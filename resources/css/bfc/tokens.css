@@ -1,0 +1,49 @@
+:root {
+  --brand-primary: #7C2A76;
+  --brand-primary-hover: #62205d;
+  --brand-primary-soft: #f7eff6;
+  --brand-accent: #CD8B2D;
+  --brand-accent-soft: #fff4df;
+  --background: #f8f7f9;
+  --surface: #ffffff;
+  --surface-secondary: #fcfafc;
+  --ink: #252934;
+  --ink-soft: #526075;
+  --ink-muted: #657084;
+  --stroke: #ebe8ed;
+  --stroke-strong: #dfd9e2;
+  --success: #176846;
+  --success-bg: #e9f6ee;
+  --warning: #795000;
+  --warning-bg: #fff6cf;
+  --danger: #b12c38;
+  --danger-bg: #fff0f1;
+  --info: #295e9b;
+  --info-bg: #e9f3ff;
+  --radius-xs: 7px;
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 21px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --font: "Be Vietnam Pro", "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-base: 14px;
+  --shadow: 0 8px 28px rgba(67,42,69,.06);
+  --aside-width: 240px;
+}
+[data-theme="dark"] {
+  --background:#14151a;--surface:#212127;--surface-secondary:#26252e;
+  --ink:#f5f0f5;--ink-soft:#c7c3ce;--ink-muted:#b3b0ba;
+  --stroke:#3a3942;--stroke-strong:#504b58;
+  --brand-primary-soft:#352038;--brand-accent-soft:#443525;
+  --success:#83d8ae;--success-bg:#183b2b;
+  --warning:#f5d477;--warning-bg:#443822;
+  --danger:#ffa4aa;--danger-bg:#48262c;
+  --info:#8bb8f6;--info-bg:#243548;
+  --shadow:0 8px 28px rgba(0,0,0,.25);
+}
