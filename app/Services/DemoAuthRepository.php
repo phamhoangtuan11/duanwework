@@ -114,6 +114,7 @@ class DemoAuthRepository
             'user_role_scopes' => [],
             'notifications' => [],
             'audit_logs' => [],
+            'projects' => [],
             'tasks' => [],
         ];
     }

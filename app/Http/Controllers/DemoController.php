@@ -5,10 +5,11 @@ namespace App\Http\Controllers;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
 use App\Services\DemoAccessService;
+use App\Services\DemoProjectService;
 
 class DemoController extends Controller
 {
-    public function index(Request $request, DemoAccessService $access): View
+    public function index(Request $request, DemoAccessService $access, DemoProjectService $projectService): View
     {
         $user = $access->currentUser($request->session()->get('demo_user_id'));
         if (! $user && $request->session()->has('demo_user_id')) {
@@ -47,8 +48,10 @@ class DemoController extends Controller
                 'permissions' => $permissions,
                 'emailDomains' => $access->emailDomains(),
                 'notifications' => $user ? $access->notifications($user) : [],
-                'kpiBank' => $kpiBank,
-                'authMode' => 'local-json-demo',
+                'kpiBank'       => $kpiBank,
+                'departmentKpis' => $user ? $access->departmentKpisForUser($user) : [],
+                'projects'      => $user ? $projectService->listProjects($user) : [],
+                'authMode'      => 'local-json-demo',
             ],
         ]);
     }

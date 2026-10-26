@@ -4,8 +4,111 @@ namespace App\Services;
 
 class DemoAccessService
 {
+    public const OPERATIONAL_KPIS = [
+        'CNTT' => [
+            [
+                'id' => 'CNTT-01',
+                'code' => 'CNTT-01',
+                'name' => 'Tiến độ phát triển & số hóa phần mềm (Smart Work)',
+                'category' => 'Phát triển dự án',
+                'description' => 'Triển khai đúng tiến độ các tính năng, module và dự án phần mềm theo kế hoạch.',
+            ],
+            [
+                'id' => 'CNTT-02',
+                'code' => 'CNTT-02',
+                'name' => 'Đảm bảo hạ tầng, an toàn thông tin & Uptime hệ thống >= 99.5%',
+                'category' => 'Hạ tầng & Vận hành',
+                'description' => 'Sao lưu dữ liệu định kỳ, phòng ngừa rủi ro an toàn mạng, duy trì máy chủ hoạt động liên tục.',
+            ],
+            [
+                'id' => 'CNTT-03',
+                'code' => 'CNTT-03',
+                'name' => 'Thời gian phản hồi & xử lý sự cố kỹ thuật đúng cam kết SLA',
+                'category' => 'Hỗ trợ kỹ thuật',
+                'description' => 'Tiếp nhận, xử lý kịp thời các yêu cầu hỗ trợ phần mềm, mạng và thiết bị của các phòng ban.',
+            ],
+            [
+                'id' => 'CNTT-04',
+                'code' => 'CNTT-04',
+                'name' => 'Tối ưu chi phí vận hành & nghiên cứu giải pháp công nghệ mới (AI)',
+                'category' => 'Đổi mới công nghệ',
+                'description' => 'Nghiên cứu ứng dụng trí tuệ nhân tạo, tối ưu chi phí server và bản quyền phần mềm.',
+            ],
+        ],
+        'Phòng Kinh Doanh' => [
+            [
+                'id' => 'KD-01',
+                'code' => 'KD-01',
+                'name' => 'Chỉ tiêu doanh thu & đơn hàng trọng điểm',
+                'category' => 'Kinh doanh',
+                'description' => 'Đạt kế hoạch doanh số và phát triển tệp khách hàng phân bón BFC.',
+            ],
+            [
+                'id' => 'KD-02',
+                'code' => 'KD-02',
+                'name' => 'Mở rộng thị trường & chăm sóc đại lý cấp 1',
+                'category' => 'Thị trường',
+                'description' => 'Thăm hỏi, mở rộng mạng lưới phân phối và nâng cao độ hài lòng đại lý.',
+            ],
+        ],
+        'Phòng Nhân sự' => [
+            [
+                'id' => 'NS-01',
+                'code' => 'NS-01',
+                'name' => 'Kế hoạch tuyển dụng & phát triển nguồn nhân lực chất lượng',
+                'category' => 'Tuyển dụng',
+                'description' => 'Đáp ứng chỉ tiêu nhân sự đúng thời hạn và chất lượng theo yêu cầu các phòng ban.',
+            ],
+            [
+                'id' => 'NS-02',
+                'code' => 'NS-02',
+                'name' => 'Đào tạo nội bộ & xây dựng văn hóa làm việc số BFC',
+                'category' => 'Đào tạo',
+                'description' => 'Tổ chức các khóa đào tạo quy trình, hướng dẫn sử dụng phần mềm Smart Work.',
+            ],
+        ],
+        'CHUNG' => [
+            [
+                'id' => 'GEN-01',
+                'code' => 'GEN-01',
+                'name' => 'Nâng cao hiệu suất vận hành & kỷ luật công việc BFC',
+                'category' => 'Vận hành chung',
+                'description' => 'Thực hiện công việc đúng hạn, đầy đủ check-in và nghiệm thu kết quả chuẩn mực.',
+            ],
+        ],
+    ];
+
     public function __construct(private DemoAuthRepository $repository)
     {
+    }
+
+    public function departmentKpisForUser(?array $user): array
+    {
+        if (! $user) {
+            return [];
+        }
+
+        $isSystemAdmin = ($user['role_id'] ?? '') === 'SYSTEM_ADMIN';
+        $userDept = $user['department'] ?? '';
+        $userDeptNorm = mb_strtolower(trim($userDept));
+
+        $result = self::OPERATIONAL_KPIS['CHUNG'];
+
+        foreach (self::OPERATIONAL_KPIS as $deptKey => $kpis) {
+            if ($deptKey === 'CHUNG') {
+                continue;
+            }
+            $deptKeyNorm = mb_strtolower($deptKey);
+            $matches = $isSystemAdmin
+                || str_contains($userDeptNorm, $deptKeyNorm)
+                || str_contains($deptKeyNorm, $userDeptNorm);
+
+            if ($matches) {
+                $result = array_merge($result, $kpis);
+            }
+        }
+
+        return array_values($result);
     }
 
     public function currentUser(?string $id): ?array
@@ -14,7 +117,7 @@ class DemoAccessService
             return null;
         }
 
-        $state = $this->repository->read();
+        $state ??= $this->repository->read();
         foreach ($state['users'] as $user) {
             if (($user['id'] ?? null) === $id && ($user['status'] ?? null) === 'ACTIVE') {
                 return $this->publicUser($user, $state);
@@ -100,7 +203,7 @@ class DemoAccessService
 
     public function reviewerUsers(array $user): array
     {
-        $state = $this->repository->read();
+        $state ??= $this->repository->read();
 
         return array_values(array_map(
             fn (array $candidate) => $this->publicUser($candidate, $state),
@@ -114,11 +217,23 @@ class DemoAccessService
         return $this->inTaskScope($user, $task, 'tasks.assign', $state);
     }
 
-    public function visibleTasks(array $user): array
+    public function visibleTasks(array $user, ?array $state = null): array
     {
-        $state = $this->repository->read();
+        $state ??= $this->repository->read();
 
-        return array_values(array_filter($state['tasks'], fn (array $task) => $this->canViewTask($user, $task, $state)));
+        $tasks = array_values(array_filter($state['tasks'], fn (array $task) => $this->canViewTask($user, $task, $state)));
+
+        usort($tasks, function ($a, $b) {
+            $timeA = $a['created_at'] ?? $a['createdAt'] ?? '';
+            $timeB = $b['created_at'] ?? $b['createdAt'] ?? '';
+            if ($timeA !== '' && $timeB !== '') {
+                return strcmp($timeB, $timeA);
+            }
+
+            return strcmp($b['id'] ?? '', $a['id'] ?? '');
+        });
+
+        return $tasks;
     }
 
     public function emailDomains(): array
@@ -128,7 +243,7 @@ class DemoAccessService
 
     public function notifications(array $user): array
     {
-        $state = $this->repository->read();
+        $state ??= $this->repository->read();
 
         return array_values(array_filter(
             array_reverse($state['notifications']),
@@ -138,7 +253,7 @@ class DemoAccessService
 
     public function assignableUsers(array $user): array
     {
-        $state = $this->repository->read();
+        $state ??= $this->repository->read();
         $scope = $state['user_role_scopes'][$user['id']] ?? [];
         $canAssign = $this->can($user, 'tasks.assign', $state);
         $isSystemAdmin = $user['role_id'] === 'SYSTEM_ADMIN';

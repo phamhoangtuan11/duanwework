@@ -47,6 +47,7 @@ const ICONS={
 function ic(name,size=18){return `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||ICONS.info}</svg>`}
 const safe=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmtNum=n=>new Intl.NumberFormat('vi-VN').format(Number(n)||0);
+const generateNextTaskId=()=>{const maxNum=(state.tasks||[]).reduce((max,t)=>{const m=String(t.id||'').match(/CV-(\d+)/i);return m?Math.max(max,parseInt(m[1],10)):max},1000);return `CV-${maxNum+1}`};
 const dateHuman=(s)=>{if(!s)return 'Chưa đặt';const parts=String(s).slice(0,10).split('-');return parts.length===3?`${parts[2]}/${parts[1]}/${parts[0]}`:s};
 const deadlineHuman=task=>`${dateHuman(task.due)}${task.due_time?` · ${safe(task.due_time)}`:''}`;
 const dateMonth=(s)=>{const a=String(s).slice(0,10).split('-');return [a[2],a[1]]};
@@ -135,7 +136,7 @@ const legacyTasks=readLegacyTasks();
 const authUser=boot.authUser||null;
 const workspaceMode=authUser?.role_id==='SYSTEM_ADMIN'&&storedUi.workspaceMode!=='employee'?'admin':'employee';
 const initialPages=workspaceMode==='admin'?['settings']:SECTIONS.map(section=>section.id);
-const state={tasks:Array.isArray(boot.tasks)?boot.tasks:[],serverTasks:Array.isArray(boot.tasks)?structuredClone(boot.tasks):[],users:Array.isArray(boot.assignableUsers)?boot.assignableUsers:[],reviewerUsers:Array.isArray(boot.reviewerUsers)?boot.reviewerUsers:[],authUser,permissions:Array.isArray(boot.permissions)?boot.permissions:[],notifications:Array.isArray(boot.notifications)?boot.notifications:[],kpiBank:boot.kpiBank&&Array.isArray(boot.kpiBank.kpis)?boot.kpiBank:null,kpiBankView:Boolean(storedUi.kpiBankView),kpiAnalyticsView:Boolean(storedUi.kpiAnalyticsView),kpiBankSearch:'',kpiBankDepartment:'',kpiBankPerspective:'',goalNavOpen:typeof storedUi.goalNavOpen==='boolean'?storedUi.goalNavOpen:storedUi.page==='goals',adminData:null,adminLoading:false,legacyTasks,legacyImported:Boolean(authUser&&localStorage.getItem(`bfc-smart-work-legacy-imported-${authUser.id}`)),authScreen:'login',authMessage:'',adminMessage:'',workspaceMode,page:initialPages.includes(storedUi.page)?storedUi.page:(workspaceMode==='admin'?'settings':'tasks'),view:'list',filter:'all',search:'',theme:storedUi.theme==='dark'?'dark':'light',period:currentPeriod,detail:null,modal:null,pendingTaskDraft:null,ai:false,aiMessages:[],mobile:false,login:!authUser,saveQueue:Promise.resolve()};
+const state={tasks:Array.isArray(boot.tasks)?boot.tasks:[],serverTasks:Array.isArray(boot.tasks)?structuredClone(boot.tasks):[],users:Array.isArray(boot.assignableUsers)?boot.assignableUsers:[],reviewerUsers:Array.isArray(boot.reviewerUsers)?boot.reviewerUsers:[],authUser,permissions:Array.isArray(boot.permissions)?boot.permissions:[],notifications:Array.isArray(boot.notifications)?boot.notifications:[],kpiBank:boot.kpiBank&&Array.isArray(boot.kpiBank.kpis)?boot.kpiBank:null,departmentKpis:Array.isArray(boot.departmentKpis)?boot.departmentKpis:[],projects:Array.isArray(boot.projects)?boot.projects:[],projectModal:null,kpiBankView:Boolean(storedUi.kpiBankView),kpiAnalyticsView:Boolean(storedUi.kpiAnalyticsView),kpiBankSearch:'',kpiBankDepartment:'',kpiBankPerspective:'',goalNavOpen:typeof storedUi.goalNavOpen==='boolean'?storedUi.goalNavOpen:storedUi.page==='goals',adminData:null,adminLoading:false,legacyTasks,legacyImported:Boolean(authUser&&localStorage.getItem(`bfc-smart-work-legacy-imported-${authUser.id}`)),authScreen:'login',authMessage:'',adminMessage:'',workspaceMode,page:initialPages.includes(storedUi.page)?storedUi.page:(workspaceMode==='admin'?'settings':'tasks'),view:'list',filter:'all',search:'',theme:storedUi.theme==='dark'?'dark':'light',period:currentPeriod,kpiScope:storedUi.kpiScope||(['DEPARTMENT_MANAGER','SYSTEM_ADMIN'].includes(authUser?.role_id)?'department':'mine'),detail:null,modal:null,pendingTaskDraft:null,ai:false,aiMessages:[],aiBriefing:null,aiThinking:false,aiLoadingBriefing:false,mobile:false,login:!authUser,saveQueue:Promise.resolve()};
 function save(){
   if(!state.authUser)return false;
   const snapshot=structuredClone(state.tasks);
@@ -153,7 +154,7 @@ function save(){
 }
 function saveUi(){
   try {
-    localStorage.setItem(UI_STORAGE_KEY,JSON.stringify({theme:state.theme,page:state.page,workspaceMode:state.workspaceMode,kpiBankView:state.kpiBankView,kpiAnalyticsView:state.kpiAnalyticsView,goalNavOpen:state.goalNavOpen}));
+    localStorage.setItem(UI_STORAGE_KEY,JSON.stringify({theme:state.theme,page:state.page,workspaceMode:state.workspaceMode,kpiBankView:state.kpiBankView,kpiAnalyticsView:state.kpiAnalyticsView,goalNavOpen:state.goalNavOpen,kpiScope:state.kpiScope}));
   } catch (error) {
     console.warn('Không thể lưu tùy chọn giao diện.', error);
   }
@@ -173,7 +174,7 @@ function layout(){
  if(!sections.some(x=>x.id===state.page))state.page=adminView?'settings':'tasks';
  const current=sections.find(x=>x.id===state.page)||{name:state.page==='reports'?'Báo cáo':'Cài đặt'};
  const navItem=section=>section.id==='goals'?`<div class="nav-group ${state.page==='goals'?'is-current':''}"><button type="button" class="nav-link nav-parent ${state.page==='goals'?'active':''}" data-goals-toggle aria-expanded="${state.goalNavOpen}" aria-controls="goalSubnav">${ic(section.icon)}<span>${section.name}</span><span class="nav-chevron">${ic('chevron',15)}</span></button><div class="nav-submenu ${state.goalNavOpen?'is-open':''}" id="goalSubnav" aria-hidden="${!state.goalNavOpen}" ${state.goalNavOpen?'':'inert'}><button type="button" class="nav-sublink ${!state.reportView&&!state.kpiBankView&&!state.kpiAnalyticsView?'active':''}" data-kpi-view="score" ${!state.reportView&&!state.kpiBankView&&!state.kpiAnalyticsView?'aria-current="page"':''}>KPI công việc</button><button type="button" class="nav-sublink ${!state.reportView&&state.kpiBankView?'active':''}" data-kpi-view="bank" ${!state.reportView&&state.kpiBankView?'aria-current="page"':''}>Ngân hàng KPI demo 2026</button><button type="button" class="nav-sublink ${!state.reportView&&state.kpiAnalyticsView?'active':''}" data-kpi-view="analytics" ${!state.reportView&&state.kpiAnalyticsView?'aria-current="page"':''}>Phân tích danh mục KPI</button></div></div>`:`<button type="button" class="nav-link ${section.id===state.page?'active':''}" data-page="${section.id}" ${section.id===state.page?'aria-current="page"':''}>${ic(section.icon)}<span>${section.name}</span></button>`;
- root.innerHTML=`<div class="app"><aside class="sidebar ${state.mobile?'mobile-open':''}" aria-label="Điều hướng chính"><div class="brand">${brand()}<div><span class="brandname">BFC Smart Work</span><span class="brandsub">Không gian làm việc</span></div></div><div class="nav-head">Không gian làm việc</div><nav class="nav">${sections.map(navItem).join('')}</nav><div class="side-bottom"><span class="sample-chip">LƯU TRÊN MÁY CHỦ CỤC BỘ</span><div class="side-sub">${ic('shield',16)}<span>Chế độ local · Không đồng bộ máy khác</span></div></div></aside><main class="main"><header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="icon-btn menu-btn" data-action="menu" aria-label="Mở điều hướng">${ic('menu')}</button><div><p class="top-title">Không gian BFC / BFC Smart Work</p><div class="crumb">${safe(current.name)}</div></div></div><div class="top-actions">${!adminView?`<label class="search">${ic('search')}<input id="globalSearch" aria-label="Tìm công việc" placeholder="Tìm nhanh công việc..." value="${safe(state.search)}"></label>`:''}${isAdmin?`<button class="btn workspace-switch" data-action="workspace-switch">${adminView?'Không gian nhân viên':'Quản trị hệ thống'}</button>`:''}<div class="auth-identity"><strong>${safe(meName())}</strong><span>${safe(state.authUser.role_label)}</span></div><button class="icon-btn" data-action="logout" title="Đăng xuất" aria-label="Đăng xuất">${ic('logout')}</button></div></header><div class="content">${renderPage()}</div></main></div>${state.mobile?'<div class="mobile-backdrop" data-action="menu"></div>':''}${adminView?'':`<button class="ai-fab" data-action="ai" aria-label="Mở trợ lý AI">${ic('sparkles')}<span>Trợ lý AI</span></button>`}${state.detail?detailHTML():''}${state.modal?modalHTML():''}${state.ai?aiHTML():''}<div class="toast" role="status" id="toast" hidden></div>`;
+ root.innerHTML=`<div class="app"><aside class="sidebar ${state.mobile?'mobile-open':''}" aria-label="Điều hướng chính"><div class="brand">${brand()}<div><span class="brandname">BFC Smart Work</span><span class="brandsub">Không gian làm việc</span></div></div><div class="nav-head">Không gian làm việc</div><nav class="nav">${sections.map(navItem).join('')}</nav><div class="side-bottom"><span class="sample-chip">LƯU TRÊN MÁY CHỦ CỤC BỘ</span><div class="side-sub">${ic('shield',16)}<span>Chế độ local · Không đồng bộ máy khác</span></div></div></aside><main class="main"><header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="icon-btn menu-btn" data-action="menu" aria-label="Mở điều hướng">${ic('menu')}</button><div><p class="top-title">Không gian BFC / BFC Smart Work</p><div class="crumb">${safe(current.name)}</div></div></div><div class="top-actions">${!adminView?`<label class="search">${ic('search')}<input id="globalSearch" aria-label="Tìm công việc" placeholder="Tìm nhanh công việc..." value="${safe(state.search)}"></label>`:''}${isAdmin?`<button class="btn workspace-switch" data-action="workspace-switch">${adminView?'Không gian nhân viên':'Quản trị hệ thống'}</button>`:''}<div class="auth-identity"><strong>${safe(meName())}</strong><span>${safe(state.authUser.role_label)}</span></div><button class="icon-btn" data-action="logout" title="Đăng xuất" aria-label="Đăng xuất">${ic('logout')}</button></div></header><div class="content">${renderPage()}</div></main></div>${state.mobile?'<div class="mobile-backdrop" data-action="menu"></div>':''}${adminView?'':mascotHTML()}${state.detail?detailHTML():''}${(state.modal||state.projectModal)?modalHTML():''}${state.ai?aiHTML():''}<div class="toast" role="status" id="toast" hidden></div>`;
  if(adminView&&!state.adminData&&!state.adminLoading&&!state.adminMessage)loadAdminData();
 }
 function initials(x){return x.split(' ').slice(-2).map(x=>x[0]).join('').toUpperCase()}
@@ -201,7 +202,41 @@ function pageWorkflowMap(){const branches=[
  {number:'06',title:'Theo dõi dự án, KPI & báo cáo',tone:'blue',icon:'chart',steps:['Dự án tổng hợp công việc theo dự án; KPI và báo cáo chỉ dùng dữ liệu trong phạm vi tài khoản được phép xem.','Theo dõi tỷ lệ hoàn thành, đúng hạn, có check-in và đạt duyệt; các chỉ số hiển thị riêng, không cộng thành điểm tổng.','Có thể xem báo cáo và xuất CSV; KPI hiện là minh họa, chưa phải công thức doanh nghiệp đã xác nhận.'],action:'goals',label:'Mở Mục tiêu & KPI',extra:'reports'}
  ];return `${pageHeader('HƯỚNG DẪN KHÔNG GIAN LÀM VIỆC','Mindmap quy trình quản lý công việc','Sơ đồ thể hiện các luồng tài khoản, phân quyền và quản lý công việc theo cập nhật mới nhất.')}${card(`<p class="mindmap-hint">Luồng tổng thể: đăng nhập/cấp quyền → chọn không gian phù hợp → giao việc → thực hiện → nghiệm thu → theo dõi KPI. Nhánh quản trị chỉ dành cho SYSTEM_ADMIN.</p><div class="mindmap-diagram"><div class="mindmap-root">${ic('map',22)}<div><strong>Quy trình quản lý công việc</strong><span>Đăng nhập → phân quyền → giao việc → thực hiện → nghiệm thu → KPI</span></div></div><div class="mindmap-tree">${branches.map(branch=>`<article class="mindmap-branch ${branch.tone}"><div class="mindmap-branch-head"><span class="mindmap-number">${branch.number}</span><span class="mindmap-icon">${ic(branch.icon,19)}</span><h2>${branch.title}</h2></div><ol class="mindmap-leaves">${branch.steps.map(step=>`<li>${step}</li>`).join('')}</ol><div class="mindmap-actions"><button class="btn btn-min" data-page="${branch.action}">${branch.label} ${ic('arrow-right',15)}</button>${branch.extra==='ai'?'<button class="btn btn-min" data-action="ai">Mở Trợ lý AI</button>':''}${branch.extra==='reports'?'<button class="btn btn-min" data-page="reports">Mở Báo cáo</button>':''}${branch.extra==='admin'&&isSystemAdmin()&&state.workspaceMode==='employee'?'<button class="btn btn-min" data-action="workspace-switch">Mở Quản trị hệ thống</button>':''}</div></article>`).join('')}</div></div><div class="mindmap-note">${ic('info',17)}<span>Quyền công việc được kiểm tra phía Laravel; dữ liệu tài khoản, quyền, nhật ký và công việc lưu ở kho JSON riêng tư trên máy local. Email chưa xác minh quyền sở hữu; Trợ lý AI chạy quy tắc cục bộ; KPI mang tính minh họa; dữ liệu chưa đồng bộ giữa các máy.</span></div>`,'mindmap-card')}`}
 function pageOverview(){const s=stats();return `${pageHeader('CHÀO MỪNG TRỞ LẠI','Tổng quan công việc','Tình hình thực hiện tại BFC trong dữ liệu minh họa.',taskCreateButton())}<div class="grid stats">${statBlock('Công việc đang mở',s.all-s.done,'Tất cả phòng ban',false,'activity')}${statBlock('Hoàn thành',s.done,'Đã chốt kết quả',false,'check')}${statBlock('Chờ phê duyệt',s.review,'Cần người có thẩm quyền',true,'clock')}${statBlock('Tiến độ trung bình',s.avg+'','%',false,'chart')}</div><div class="card-row">${card(`${sectionHead('Công việc cần chú ý',`<button class="btn btn-min" data-page="tasks">Xem tất cả ${ic('arrow-right')}</button>`)}${state.tasks.filter(t=>t.status!=='COMPLETED').sort((a,b)=>a.due.localeCompare(b.due)).slice(0,5).map(t=>`<div class="list-line"><div class="project-icon" style="height:34px;width:34px">${ic('check-square',17)}</div><div style="min-width:0;flex:1"><button class="task-open name" data-task="${safe(t.id)}">${safe(t.title)}</button><div class="description">${safe(t.assignee)} · ${dateHuman(t.due)}</div></div>${overdue(t)?'<span class="tag late">Quá hạn</span>':displayStatus(t)}</div>`).join('')}`)}${card(`${sectionHead('Tiến độ theo dự án')}${projectList().map(p=>`<div class="chartbar"><div class="title">${safe(p.name)}</div><div class="progressbar"><span style="width:${p.progress}%"></span></div><div class="pct">${p.progress}%</div></div>`).join('')}<div class="ai-tip"><div class="tip-icon">${ic('sparkles',21)}</div><div><h3>Trợ lý tại nơi làm việc</h3><p>Tóm tắt nhanh công việc quá hạn, chờ phê duyệt hoặc cần check-in.</p></div></div>`)} </div>`}
-function periodTasks(){return state.tasks.filter(t=>t.assignee===meName()&&String(t.due||'').slice(0,7)===state.period)}
+function periodTasks(){
+ const isDept=state.kpiScope==='department'&&canManage();
+ return state.tasks.filter(t=>{
+  if(String(t.due||'').slice(0,7)!==state.period)return false;
+  return isDept?true:t.assignee===meName();
+ });
+}
+function departmentKpisTrackerHTML(){
+ const kpis=state.departmentKpis||[];
+ if(!kpis.length)return '';
+ const isDept=state.kpiScope==='department'&&canManage();
+ const items=kpis.map(k=>{
+  const linked=state.tasks.filter(t=>{
+   if(t.kpi_id!==k.id)return false;
+   if(!isDept&&t.assignee!==meName())return false;
+   return String(t.due||'').slice(0,7)===state.period;
+  });
+  const completed=linked.filter(t=>t.status==='COMPLETED');
+  const inProgress=linked.filter(t=>['IN_PROGRESS','IN_REVIEW','PAUSED'].includes(t.status));
+  const avgProgress=linked.length?Math.round(linked.reduce((sum,t)=>sum+(Number(t.progress)||0),0)/linked.length):0;
+  return {kpi:k,total:linked.length,completed:completed.length,inProgress:inProgress.length,avgProgress,tasks:linked};
+ });
+ return card(`<div class="card-head"><div><h2 style="font-size:16px;font-weight:780;display:flex;align-items:center;gap:8px">${ic('target',18)} Tiến độ theo chỉ tiêu KPI phòng ban</h2><p class="small muted" style="margin-top:4px">Tự động tổng hợp và tính % tiến độ từ các công việc được đính kèm mã KPI trong kỳ ${safe(state.period)}.</p></div><span class="tag progress">${fmtNum(kpis.length)} Chỉ tiêu</span></div><div class="department-kpi-grid">${items.map(item=>{
+  const k=item.kpi,color=item.avgProgress>=100?'var(--success)':(item.avgProgress>0?'var(--brand-primary)':'var(--ink-muted)');
+  return `<article class="department-kpi-card"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px"><div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span class="tag tag-kpi" style="font-weight:700;font-size:11px;background:rgba(124,42,118,0.12);color:var(--brand-primary);border:1px solid rgba(124,42,118,0.2)">[${safe(k.code||k.id)}]</span><span class="small muted" style="font-size:11px">${safe(k.category||'Vận hành')}</span></div><strong style="font-size:14px;line-height:1.4;display:block;color:var(--ink)">${safe(k.name)}</strong></div><div style="text-align:right;flex-shrink:0"><span style="font-size:22px;font-weight:800;color:${color}">${item.avgProgress}%</span><div class="small muted" style="font-size:10px">Tiến độ TB</div></div></div><p class="small muted" style="margin:8px 0;font-size:11.5px;line-height:1.45">${safe(k.description||'')}</p><div class="progressbar" style="width:100%;height:8px;background:var(--stroke);border-radius:10px;overflow:hidden"><span style="display:block;height:100%;background:${color};border-radius:10px;width:${item.avgProgress}%"></span></div><div style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px;padding-top:6px;border-top:1px dashed var(--stroke);color:var(--ink-soft);margin-top:6px"><span><strong>${fmtNum(item.total)}</strong> việc đính kèm</span><span><strong>${item.completed}</strong> hoàn thành · <strong>${item.inProgress}</strong> đang làm</span></div>${item.tasks.length?`<div class="kpi-task-pills" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${item.tasks.map(t=>`<button type="button" class="btn btn-min task-open" data-task="${safe(t.id)}" style="font-size:11px;padding:3px 8px;background:var(--surface-secondary);border:1px solid var(--stroke);border-radius:6px;display:inline-flex;align-items:center;gap:5px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${safe(t.title)} (${t.progress}%)"><span class="dot" style="background:${t.status==='COMPLETED'?'var(--success)':(t.status==='IN_REVIEW'?'var(--warning)':'var(--brand-primary)')}"></span><span style="overflow:hidden;text-overflow:ellipsis">${safe(t.id)}: ${safe(t.title)} (${t.progress}%)</span></button>`).join('')}</div>`:`<div class="small muted" style="font-size:11px;font-style:italic;margin-top:6px">Chưa có công việc nào đính kèm chỉ tiêu này trong kỳ ${safe(state.period)}.</div>`}</article>`;
+ }).join('')}</div>`,'department-kpi-wrapper');
+}
+function pageKpi(){
+ const isDept=state.kpiScope==='department'&&canManage();
+ const ts=periodTasks(),completed=ts.filter(t=>t.status==='COMPLETED'),onTime=completed.filter(t=>t.completedAt&&t.completedAt.slice(0,10)<=t.due),checked=ts.filter(t=>t.checkins?.length),submitted=ts.filter(t=>t.submittedAt?.slice(0,7)===state.period),approved=submitted.filter(t=>t.approvedAt?.slice(0,7)===state.period);
+ const rate=(n,d)=>d?Math.round(n*100/d):0;
+ const scopeTabs=canManage()?`<div class="kpi-scope-tabs"><button type="button" class="kpi-scope-btn ${state.kpiScope==='department'?'active':''}" data-kpi-scope="department">${ic('users',14)} Toàn phòng ban (${safe(state.authUser?.department||'CNTT')})</button><button type="button" class="kpi-scope-btn ${state.kpiScope==='mine'?'active':''}" data-kpi-scope="mine">${ic('user',14)} Cá nhân tôi (${safe(meName())})</button></div>`:'';
+ const subtitle=isDept?`Số liệu tổng hợp toàn bộ nhân sự phòng ${safe(state.authUser?.department||'CNTT')} · Kỳ ${safe(state.period)}.`:`Kết quả của ${safe(meName())} · Công việc có hạn trong kỳ đã chọn.`;
+ return `${pageHeader('ĐO LƯỜNG KẾT QUẢ','KPI công việc',subtitle,scopeTabs)}<div class="card kpi-period" style="margin-bottom:20px"><div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap"><div style="min-width:180px"><label class="formlabel" for="kpiPeriod" style="margin-top:0">Kỳ KPI</label><input class="field" id="kpiPeriod" type="month" value="${safe(state.period)}"></div><div class="small muted" style="margin-top:14px">${isDept?'Tính cho tất cả công việc của phòng ban có hạn trong tháng được chọn.':'Tính theo các công việc được giao có hạn trong tháng này.'}</div></div></div><div class="grid stats">${statBlock('Tỷ lệ hoàn thành',`${rate(completed.length,ts.length)}%`,`${completed.length} / ${ts.length} công việc đến hạn`,false,'check')}${statBlock('Tỷ lệ đúng hạn',`${rate(onTime.length,completed.length)}%`,`${onTime.length} / ${completed.length} công việc hoàn thành có ngày hoàn thành`,false,'clock')}${statBlock('Tỷ lệ có check-in',`${rate(checked.length,ts.length)}%`,`${checked.length} / ${ts.length} công việc đến hạn`,false,'activity')}${statBlock('Tỷ lệ đạt duyệt',`${rate(approved.length,submitted.length)}%`,`${approved.length} / ${submitted.length} công việc đã gửi duyệt trong kỳ`,true,'shield')}</div>${departmentKpisTrackerHTML()}${card(`${sectionHead('Công thức và phạm vi')}<div class="report-row"><span class="small muted">Hoàn thành</span><strong>Tổng việc trạng thái Hoàn thành / tổng việc có hạn trong tháng</strong></div><div class="report-row"><span class="small muted">Đúng hạn</span><strong>Việc hoàn thành có thời điểm hoàn thành không sau hạn / số việc hoàn thành</strong></div><div class="report-row"><span class="small muted">Có check-in</span><strong>Việc có ít nhất một check-in / tổng việc có hạn trong tháng</strong></div><div class="report-row"><span class="small muted">Đạt duyệt</span><strong>Việc đã được duyệt / việc đã gửi duyệt trong tháng</strong></div><div class="report-row"><span class="small muted">Tiến độ chỉ tiêu KPI</span><strong>Trung bình cộng % tiến độ của các công việc được đính kèm mã chỉ tiêu tương ứng</strong></div><p class="small muted" style="margin-top:10px">Các chỉ số hiển thị minh bạch theo thời gian thực khi nhân sự check-in tiến độ hoặc hoàn tất nghiệm thu công việc.</p>`)}`
+}
 function pageKpiBank(){
  const source=state.kpiBank,rows=source?.kpis||[],departments=[...new Set(rows.map(row=>row.department).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'vi')),perspectives=[...new Set(rows.map(row=>row.bsc_perspective).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'vi')),search=normalizeForMatch(state.kpiBankSearch).text;
  const filtered=rows.filter(row=>(!state.kpiBankDepartment||row.department===state.kpiBankDepartment)&&(!state.kpiBankPerspective||row.bsc_perspective===state.kpiBankPerspective)&&(!search||normalizeForMatch([row.id,row.original_code,row.name,row.department,row.company_objective,row.department_objective,row.calculation_description,row.data_source,row.data_provider].filter(Boolean).join(' ')).text.includes(search)));
@@ -231,7 +266,6 @@ function pageKpiBank(){
  if(state.kpiAnalyticsView)return `${pageHeader('TỔNG QUAN DANH MỤC','Phân tích danh mục KPI',`Cơ cấu và chất lượng của ${fmtNum(rows.length)} chỉ tiêu tham khảo. Đây không phải báo cáo kết quả thực hiện.`,`<span class="tag progress">DEMO ${safe(source?.demo_cycle_year||2026)}</span>`)}${pageSummary}${dashboard}`;
  return `${pageHeader('DANH MỤC THAM KHẢO','Ngân hàng KPI · Demo 2026',`${fmtNum(filtered.length)} / ${fmtNum(rows.length)} chỉ tiêu · Bảng đầy đủ theo các cột dữ liệu nguồn. Cuộn ngang để xem toàn bộ; không dùng tính điểm.`,`<span class="tag progress">DEMO ${safe(source?.demo_cycle_year||2026)}</span>`)}${pageSummary}<section class="card kpi-bank-card"><div class="kpi-bank-filters"><label><span class="formlabel">Tìm KPI</span><input class="field" id="kpiBankSearch" type="search" value="${safe(state.kpiBankSearch)}" placeholder="Tên, mã, phòng ban, mục tiêu..."></label><label><span class="formlabel">Phòng ban</span><select class="field" id="kpiBankDepartment"><option value="">Tất cả phòng ban</option>${departmentOptions}</select></label><label><span class="formlabel">Khía cạnh BSC</span><select class="field" id="kpiBankPerspective"><option value="">Tất cả khía cạnh</option>${perspectiveOptions}</select></label></div><div class="kpi-bank-table-meta"><span>${fmtNum(filtered.length)} dòng hiển thị · ${fmtNum(rows.length)} dòng trong danh mục</span><span>Cuộn ngang để xem các cột còn lại</span></div><div class="table-wrap kpi-spreadsheet-wrap" role="region" aria-label="Bảng đầy đủ ngân hàng KPI" tabindex="0"><table class="task-table kpi-bank-table"><thead><tr><th>Tổ chức</th><th>Năm nguồn</th><th>Cấp KPI</th><th>Phòng ban</th><th>Khía cạnh BSC</th><th>Mã gốc</th><th>Tên chỉ tiêu</th><th>Mục tiêu công ty</th><th>Mục tiêu phòng ban</th><th>Chỉ tiêu tham khảo</th><th>Đơn vị</th><th>Trọng số tham khảo</th><th>Tần suất</th><th>Mô tả cách tính</th><th>Nguồn dữ liệu</th><th>Đơn vị cung cấp</th><th>Sheet nguồn</th><th>Dòng nguồn</th><th>Ưu tiên nguồn</th><th>Trạng thái</th><th>Cờ rà soát</th></tr></thead><tbody>${tableRows||'<tr><td colspan="21"><div class="empty">Không tìm thấy chỉ tiêu phù hợp.</div></td></tr>'}</tbody></table></div></section>`;
 }
-function pageKpi(){const ts=periodTasks(),completed=ts.filter(t=>t.status==='COMPLETED'),onTime=completed.filter(t=>t.completedAt&&t.completedAt.slice(0,10)<=t.due),checked=ts.filter(t=>t.checkins?.length),submitted=ts.filter(t=>t.submittedAt?.slice(0,7)===state.period),approved=submitted.filter(t=>t.approvedAt?.slice(0,7)===state.period);const rate=(n,d)=>d?Math.round(n*100/d):0;return `${pageHeader('ĐO LƯỜNG KẾT QUẢ','KPI công việc',`Kết quả của ${safe(meName())} · Công việc có hạn trong kỳ đã chọn.`)}<div class="card kpi-period"><label class="formlabel" for="kpiPeriod">Kỳ KPI</label><input class="field" id="kpiPeriod" type="month" value="${safe(state.period)}"><span class="small muted">Tính theo các công việc được giao có hạn trong tháng này.</span></div><div class="grid stats">${statBlock('Tỷ lệ hoàn thành',`${rate(completed.length,ts.length)}%`,`${completed.length} / ${ts.length} công việc đến hạn`,false,'check')}${statBlock('Tỷ lệ đúng hạn',`${rate(onTime.length,completed.length)}%`,`${onTime.length} / ${completed.length} công việc hoàn thành có ngày hoàn thành`,false,'clock')}${statBlock('Tỷ lệ có check-in',`${rate(checked.length,ts.length)}%`,`${checked.length} / ${ts.length} công việc đến hạn`,false,'activity')}${statBlock('Tỷ lệ đạt duyệt',`${rate(approved.length,submitted.length)}%`,`${approved.length} / ${submitted.length} công việc đã gửi duyệt trong kỳ`,true,'shield')}</div>${card(`${sectionHead('Công thức và phạm vi')}<div class="report-row"><span class="small muted">Hoàn thành</span><strong>Tổng việc trạng thái Hoàn thành / tổng việc được giao có hạn trong tháng</strong></div><div class="report-row"><span class="small muted">Đúng hạn</span><strong>Việc hoàn thành có thời điểm hoàn thành không sau hạn / số việc hoàn thành</strong></div><div class="report-row"><span class="small muted">Có check-in</span><strong>Việc có ít nhất một check-in / tổng việc được giao có hạn trong tháng</strong></div><div class="report-row"><span class="small muted">Đạt duyệt</span><strong>Việc đã được duyệt / việc đã gửi duyệt trong tháng</strong></div><p class="small muted">Các chỉ số hiển thị riêng, không cộng thành điểm tổng. Việc cũ chưa có thời điểm hoàn thành được tính là chưa đủ dữ liệu để xác nhận đúng hạn.</p>`)}` }
 function pageGoals(){const s=stats();return `${pageHeader('ĐỊNH HƯỚNG VÀ ĐO LƯỜNG','Mục tiêu & KPI','Xem mối liên kết mục tiêu, KPI và công việc thực hiện.','<span class="tag progress">Minh họa liên kết</span>')}<div class="kpi-hero">${card(`<div class="eyebrow">MỤC TIÊU BFC · 2026</div><div class="objective"><div class="muted small">O1 · Nâng cao hiệu quả vận hành</div><h3>Chuẩn hóa quản trị công việc và đánh giá hiệu suất</h3><div class="muted small">Mục tiêu liên kết với dự án Nâng cấp WeWork và Chuẩn hóa KPI BFC.</div></div><h2>Chỉ số kết quả chính</h2><div class="kpi-card"><div class="small muted">KPI-01 · Tỷ lệ công việc hoàn thành đúng hạn</div><div class="kpi-num">${s.done?Math.round(s.done/s.all*100):0}% <span class="small muted" style="font-weight:normal">/ Mục tiêu 95%</span></div><div class="progressbar"><span style="width:${Math.min(100,s.done/s.all*100)}%"></span></div><div class="small muted" style="margin-top:9px">Giá trị demo minh họa; chưa phải công thức KPI thực tế.</div></div><div class="kpi-card"><div class="small muted">KPI-02 · Tỷ lệ công việc có check-in</div><div class="kpi-num">${Math.round(state.tasks.filter(x=>x.checkins?.length).length/Math.max(1,s.all)*100)}%</div><div class="progressbar"><span style="width:${Math.round(state.tasks.filter(x=>x.checkins?.length).length/Math.max(1,s.all)*100)}%"></span></div></div>`)}${card(`${sectionHead('Dữ liệu liên kết')}<p class="small muted">Một mục tiêu có thể liên kết nhiều KPI, dự án và công việc. Kết quả công việc chỉ được đưa vào KPI khi đủ công thức và bằng chứng.</p><div class="list-line"><div class="project-icon">${ic('target')}</div><div><strong>Mục tiêu O1</strong><div class="description">Nâng cao hiệu suất quản trị</div></div></div><div class="list-line"><div class="project-icon">${ic('chart')}</div><div><strong>KPI-01, KPI-02</strong><div class="description">Chỉ số kết quả được đo theo kỳ</div></div></div><div class="list-line"><div class="project-icon">${ic('folder')}</div><div><strong>${fmtNum(projectList().length)} dự án liên quan</strong><div class="description">Phân rã thành các công việc thực hiện</div></div></div><button class="btn" data-page="projects" style="margin-top:18px">Mở danh sách dự án ${ic('arrow-right')}</button>`)}</div>`}
 function projectList(){const visible=visibleTasks();return [...new Set(visible.map(t=>t.project))].map(name=>{const t=visible.filter(x=>x.project===name);return {name,count:t.length,done:t.filter(x=>x.status==='COMPLETED').length,progress:Math.round(t.reduce((a,b)=>a+b.progress,0)/Math.max(1,t.length))}})}
 function pageProjects(){const projects=projectList();return `${pageHeader('KẾ HOẠCH THỰC HIỆN','Dự án','Theo dõi tình hình các dự án và công việc liên quan.','<span class="tag progress">Dữ liệu mẫu</span>')}<div class="project-grid">${projects.map((p,i)=>card(`<div class="project-icon">${ic('folder',22)}</div><div class="project-title">${safe(p.name)}</div><div class="project-meta">${fmtNum(p.count)} công việc · ${fmtNum(p.done)} đã hoàn thành<br>Liên kết mục tiêu vận hành BFC</div><div class="project-progress"><div class="progressbar"><span style="width:${p.progress}%"></span></div><strong>${p.progress}%</strong></div><button class="btn" data-project="${safe(p.name)}" style="margin-top:22px;width:100%">Xem công việc ${ic('arrow-right')}</button>`,'project-card')).join('')}</div>`}
@@ -250,18 +284,296 @@ function detailHTML(){const t=state.tasks.find(x=>x.id===state.detail);if(!t||!r
  if(t.status==='PAUSED'&&roleAllowed(t,'start'))actions.push(`<button class="btn" data-transition="resume">Tiếp tục</button>`);
  const canEdit=roleAllowed(t,'edit'),subtasks=Array.isArray(t.subtasks)?t.subtasks:[],comments=Array.isArray(t.comments)?t.comments:[];
  const description=String(t.description||''),result=String(t.result||'');
- return `<div class="panel-backdrop" data-action="detail-close"></div><aside class="detail-panel" role="dialog" aria-modal="true" aria-label="Chi tiết công việc"><div class="panel-head"><div><div class="eyebrow">${safe(t.id)} · ${safe(t.project)}</div><h2 class="detail-title">${safe(t.title)}</h2>${displayStatus(t)}</div><button class="icon-btn" data-action="detail-close" aria-label="Đóng">${ic('close')}</button></div><div class="panel-body"><div class="detail-grid"><div class="kv"><small>Người chịu trách nhiệm</small><strong>${safe(t.assignee)}</strong></div><div class="kv"><small>Người giao</small><strong>${safe(t.creator)}</strong></div><div class="kv"><small>Thời gian bắt đầu</small><strong>${dateHuman(t.start_date)}</strong></div><div class="kv"><small>Hạn hoàn thành</small><strong>${deadlineHuman(t)}</strong></div><div class="kv"><small>Ưu tiên</small><span class="tag ${priorities[t.priority]}">${priority[t.priority]}</span></div><div class="kv"><small>Tiến độ</small><strong>${fmtNum(t.progress)}%</strong></div><div class="kv"><small>Yêu cầu nghiệm thu</small><strong>${t.review?'Có':'Không'}</strong></div></div><div class="progressbar" style="width:100%;margin-bottom:22px"><span style="width:${t.progress}%"></span></div>
- <section class="detail-section"><div class="detail-section-head"><h3>Mô tả công việc</h3>${canEdit?'<span class="small muted">Nội dung, tài liệu, checklist và liên kết</span>':''}</div>${canEdit?`<form class="detail-edit-form" data-detail-form="description"><textarea class="field detail-textarea" name="value" maxlength="5000" placeholder="Thêm mô tả công việc, yêu cầu và phạm vi thực hiện...">${safe(description)}</textarea><button class="btn btn-min" type="submit">${ic('check')} Lưu mô tả</button></form><div class="task-resource-actions">${attachmentInput('description')}<button class="btn btn-min" type="button" data-action="show-checklist-form">${ic('list')} Thêm checklist</button><button class="btn btn-min" type="button" data-action="show-link-form">${ic('link')} Thêm liên kết</button></div><form class="subtask-form task-resource-form" data-detail-form="checklist" hidden><input class="field" name="title" minlength="2" maxlength="100" required placeholder="Tên checklist"><button class="btn" type="submit">Tạo checklist</button></form><form class="task-link-form" data-detail-form="link" hidden><input class="field" name="title" maxlength="100" required placeholder="Tên liên kết"><input class="field" name="url" type="url" maxlength="2048" required placeholder="https://..."><button class="btn" type="submit">Thêm</button></form><p class="small muted">Tài liệu được lưu trên máy chủ local; chưa kết nối Base Drive/Pro.</p>`:`<div class="detail-prose">${description?safe(description):'<span class="muted">Chưa có mô tả công việc.</span>'}</div>`}${taskAttachmentsHTML(t,'description')}${taskLinksHTML(t)}${taskChecklistsHTML(t,canEdit)}</section>
- <section class="detail-section"><div class="detail-section-head"><h3>Kết quả công việc</h3>${canEdit?'<span class="small muted">Cập nhật kết quả và tài liệu bàn giao</span>':''}</div>${canEdit?`<form class="detail-edit-form" data-detail-form="result"><textarea class="field detail-textarea" name="value" maxlength="5000" placeholder="Cập nhật kết quả, đường dẫn hoặc ghi chú bàn giao...">${safe(result)}</textarea><button class="btn btn-min" type="submit">${ic('edit')} Cập nhật kết quả</button></form><div class="task-resource-actions">${attachmentInput('result')}</div>`:`<div class="detail-prose">${result?safe(result):'<span class="muted">Chưa cập nhật kết quả.</span>'}</div>`}${taskAttachmentsHTML(t,'result')}</section>
- <section class="detail-section"><div class="detail-section-head"><h3>Công việc con <span class="detail-count">${subtasks.filter(item=>item.done).length}/${subtasks.length}</span></h3>${canEdit&&t.status!=='COMPLETED'?'<label class="btn btn-min task-attach-button">'+ic('download')+' Nhập từ Excel<input type="file" data-subtask-import accept=".xlsx,.csv" hidden></label>':''}</div>${subtasks.length?`${subtasks.some(item=>!item.done)?'<p class="subtask-gate-note">Cần hoàn thành toàn bộ công việc con trước khi gửi nghiệm thu hoặc hoàn thành công việc cha.</p>':''}<div class="subtask-list">${subtasks.map((item,index)=>`<label class="subtask-row ${item.done?'is-done':''}"><input type="checkbox" data-subtask-toggle="${index}" ${item.done?'checked':''} ${canEdit&&!(t.status==='COMPLETED'&&item.done)?'':'disabled'}><span>${safe(item.title)}</span></label>`).join('')}</div>`:'<p class="detail-empty">Chưa có công việc con.</p>'}${canEdit&&t.status!=='COMPLETED'?'<form class="subtask-form" data-detail-form="subtask"><input class="field" name="title" maxlength="160" minlength="2" required placeholder="Thêm công việc con"><button class="btn btn-primary" type="submit" aria-label="Thêm công việc con">'+ic('plus')+'</button></form><p class="small muted">Excel: mỗi dòng nhập một tên công việc con ở cột đầu tiên (.xlsx hoặc .csv).</p>':''}</section>
- <section class="detail-section"><div class="detail-section-head"><h3>Bình luận <span class="detail-count">${comments.length}</span></h3></div>${comments.length?`<div class="comment-list">${comments.map(comment=>`<article class="comment-item"><div class="comment-avatar">${safe(initials(comment.author||'?'))}</div><div class="comment-content"><div class="comment-meta"><strong>${safe(comment.author||'Người dùng')}</strong><time>${safe(comment.at?new Date(comment.at).toLocaleString('vi-VN',{dateStyle:'short',timeStyle:'short'}):'')}</time></div><p>${safe(comment.text)}</p></div></article>`).join('')}</div>`:'<p class="detail-empty">Chưa có bình luận. Hãy bắt đầu trao đổi về công việc này.</p>'}<form class="comment-form" data-detail-form="comment"><div class="comment-input-wrap"><textarea class="field" name="text" rows="2" maxlength="2000" minlength="1" required placeholder="Viết bình luận..."></textarea><div class="comment-emoji-row"><button type="button" data-comment-emoji="😊" aria-label="Chèn mặt cười">😊</button><button type="button" data-comment-emoji="✅" aria-label="Chèn dấu hoàn thành">✅</button><button type="button" data-comment-emoji="🙏" aria-label="Chèn lời cảm ơn">🙏</button><label class="task-attach-button" title="Đính kèm tài liệu">📎<input type="file" data-task-attachment="comment" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.csv,.docx,.xlsx" hidden></label></div></div><button class="btn btn-primary" type="submit">${ic('send')} Gửi</button></form>${taskAttachmentsHTML(t,'comment')}</section>
- <h3 class="detail-history-title">Check-in & cập nhật tiến độ</h3><div class="checkin-list">${(t.checkins?.length?t.checkins.slice().reverse().map(c=>`<div class="checkin-box"><strong class="small">${fmtNum(c.pct)}% · ${dateHuman(c.at)}</strong><div class="small muted">${safe(c.text)}</div></div>`).join(''):'<p class="small muted">Chưa có check-in.</p>')}</div><h3 class="detail-history-title">Lịch sử xử lý</h3><div class="history">${(t.events?.length?t.events.slice().reverse().map(e=>`<div class="history-item">${safe(e.text)}<div class="muted">${safe(e.actor)} · ${dateHuman(e.at)}</div></div>`).join(''):'<div class="history-item">Đã khởi tạo công việc</div>')}</div>${!canEdit?'<div class="ai-tip"><div class="tip-icon">'+ic('info')+'</div><div class="small">Bạn chỉ có thể thêm bình luận. Chỉnh sửa mô tả, kết quả và công việc con dành cho người giao, người thực hiện hoặc người quản lý.</div></div>':''}</div><div class="detail-actions">${actions.join('')||'<span class="small muted">Không có thao tác khả dụng với trạng thái và vai trò hiện tại.</span>'}</div></aside>`}
-function modalHTML(){if(state.modal==='create'){return `<div class="modal-backdrop" data-action="modal-close"></div><div class="modal" role="dialog" aria-modal="true" aria-label="Tạo công việc"><div class="modal-head"><h2>Tạo công việc</h2><button class="icon-btn" data-action="modal-close" aria-label="Đóng">${ic('close')}</button></div><form id="createTask"><div class="modal-body"><label class="formlabel" for="title">Tên công việc *</label><input class="field" id="title" name="title" minlength="4" maxlength="160" required placeholder="Ví dụ: Rà soát KPI tháng 10" autofocus><label class="formlabel" for="project">Dự án</label><select class="field" id="project" name="project">${[...new Set([...state.tasks.map(t=>t.project),'Công việc độc lập'])].map(x=>`<option>${safe(x)}</option>`).join('')}</select><div class="field-row task-date-fields"><div><label class="formlabel" for="start_date">Thời gian bắt đầu *</label><input class="field" id="start_date" name="start_date" required type="date" value="${addDays(0)}"></div><div class="task-deadline-fields"><label><span class="formlabel">Hạn hoàn thành *</span><input class="field" id="due" name="due" required type="date" value="${addDays(7)}"></label><label><span class="formlabel">Giờ (tùy chọn)</span><input class="field" id="due_time" name="due_time" type="time"></label></div></div><label class="formlabel" for="employee-search-create">Người thực hiện *</label>${employeePickerMarkup('create')}<div class="field-row"><div><label class="formlabel" for="prio">Ưu tiên</label><select class="field" id="prio" name="priority"><option value="MEDIUM">Trung bình</option><option value="HIGH">Cao</option><option value="LOW">Thấp</option></select></div><div><label class="formlabel" for="progress">Tiến độ ban đầu</label><input class="field" id="progress" disabled value="0% (khi tạo)"></div></div><label class="checkline"><input type="checkbox" name="review" checked> Cần phê duyệt kết quả trước khi hoàn thành</label><label class="formlabel" for="reviewer_id">Người nghiệm thu *</label><select class="field" id="reviewer_id" name="reviewer_id" required><option value="">Chọn người nghiệm thu</option>${state.reviewerUsers.map(user=>`<option value="${safe(user.id)}">${safe(user.name)} · ${safe(user.role_label)}</option>`).join('')}</select><div class="small muted" style="margin-top:15px">${state.reviewerUsers.length?'Người nghiệm thu phải đang hoạt động, có quyền duyệt và nằm trong phạm vi của công việc.':'Chưa có tài khoản đang hoạt động được cấp quyền nghiệm thu. Bạn có thể bỏ chọn yêu cầu nghiệm thu để dùng luồng hoàn thành demo hiện hành.'} Chọn rõ người thực hiện và người nghiệm thu trước khi tạo.</div></div><div class="modal-footer"><button class="btn" type="button" data-action="modal-close">Hủy</button><button class="btn btn-primary" type="submit">${ic('plus')} Tạo công việc</button></div></form></div>`}
+ const isProjectTask=Boolean(t.project&&t.project!=='Công việc độc lập');
+ const isUrgent=['HIGH','URGENT'].includes(t.priority);
+ const isOverdue=overdue(t);
+ const hasExtensions=Number(t.extensions_count||0)>0;
+ const requiresFormalExtension=isProjectTask||isUrgent||isOverdue||hasExtensions;
+ const kpiBadge=t.kpi_id?`<span class="tag tag-kpi" style="background:rgba(124,42,118,0.12);color:var(--brand-primary);border:1px solid rgba(124,42,118,0.25);font-size:11px;font-weight:600" title="${safe(t.kpi_name||'')}">🏷️ [${safe(t.kpi_id)}] ${safe(t.kpi_name||'')}</span>`:'';
+ return `<div class="panel-backdrop" data-action="detail-close"></div><aside class="detail-panel" role="dialog" aria-modal="true" aria-label="Chi tiết công việc"><div class="panel-head"><div><div class="eyebrow">${safe(t.id)} · ${safe(t.project)}</div><h2 class="detail-title">${safe(t.title)}</h2><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${displayStatus(t)}${kpiBadge}</div></div><button class="icon-btn" data-action="detail-close" aria-label="Đóng">${ic('close')}</button></div><div class="detail-modal-layout"><div class="detail-main-col"><section class="detail-section"><div class="detail-section-head"><h3>Mô tả công việc</h3>${canEdit?'<span class="small muted">Nội dung, tài liệu, checklist và liên kết</span>':''}</div>${canEdit?`<form class="detail-edit-form" data-detail-form="description"><textarea class="field detail-textarea" name="value" maxlength="5000" placeholder="Thêm mô tả công việc, yêu cầu và phạm vi thực hiện...">${safe(description)}</textarea><button class="btn btn-min" type="submit">${ic('check')} Lưu mô tả</button></form><div class="task-resource-actions">${attachmentInput('description')}<button class="btn btn-min" type="button" data-action="show-checklist-form">${ic('list')} Thêm checklist</button><button class="btn btn-min" type="button" data-action="show-link-form">${ic('link')} Thêm liên kết</button></div><form class="subtask-form task-resource-form" data-detail-form="checklist" hidden><input class="field" name="title" minlength="2" maxlength="100" required placeholder="Tên checklist"><button class="btn" type="submit">Tạo checklist</button></form><form class="task-link-form" data-detail-form="link" hidden><input class="field" name="title" maxlength="100" required placeholder="Tên liên kết"><input class="field" name="url" type="url" maxlength="2048" required placeholder="https://..."><button class="btn" type="submit">Thêm</button></form><p class="small muted">Tài liệu được lưu trên máy chủ local; chưa kết nối Base Drive/Pro.</p>`:`<div class="detail-prose">${description?safe(description):'<span class="muted">Chưa có mô tả công việc.</span>'}</div>`}${taskAttachmentsHTML(t,'description')}${taskLinksHTML(t)}${taskChecklistsHTML(t,canEdit)}</section><section class="detail-section"><div class="detail-section-head"><h3>Kết quả công việc</h3>${canEdit?'<span class="small muted">Cập nhật kết quả và tài liệu bàn giao</span>':''}</div>${canEdit?`<form class="detail-edit-form" data-detail-form="result"><textarea class="field detail-textarea" name="value" maxlength="5000" placeholder="Cập nhật kết quả, đường dẫn hoặc ghi chú bàn giao...">${safe(result)}</textarea><button class="btn btn-min" type="submit">${ic('edit')} Cập nhật kết quả</button></form><div class="task-resource-actions">${attachmentInput('result')}</div>`:`<div class="detail-prose">${result?safe(result):'<span class="muted">Chưa cập nhật kết quả.</span>'}</div>`}${taskAttachmentsHTML(t,'result')}</section><section class="detail-section"><div class="detail-section-head"><h3>Công việc con <span class="detail-count">${subtasks.filter(item=>item.done).length}/${subtasks.length}</span></h3>${canEdit&&t.status!=='COMPLETED'?'<label class="btn btn-min task-attach-button">'+ic('download')+' Nhập từ Excel<input type="file" data-subtask-import accept=".xlsx,.csv" hidden></label>':''}</div>${subtasks.length?`${subtasks.some(item=>!item.done)?'<p class="subtask-gate-note">Cần hoàn thành toàn bộ công việc con trước khi gửi nghiệm thu hoặc hoàn thành công việc cha.</p>':''}<div class="subtask-list">${subtasks.map((item,index)=>`<label class="subtask-row ${item.done?'is-done':''}"><input type="checkbox" data-subtask-toggle="${index}" ${item.done?'checked':''} ${canEdit&&!(t.status==='COMPLETED'&&item.done)?'':'disabled'}><span>${safe(item.title)}</span></label>`).join('')}</div>`:'<p class="detail-empty">Chưa có công việc con.</p>'}${canEdit&&t.status!=='COMPLETED'?'<form class="subtask-form" data-detail-form="subtask"><input class="field" name="title" maxlength="160" minlength="2" required placeholder="Thêm công việc con"><button class="btn btn-primary" type="submit" aria-label="Thêm công việc con">'+ic('plus')+'</button></form><p class="small muted">Excel: mỗi dòng nhập một tên công việc con ở cột đầu tiên (.xlsx hoặc .csv).</p>':''}</section><section class="detail-section"><div class="detail-section-head"><h3>Bình luận <span class="detail-count">${comments.length}</span></h3></div>${comments.length?`<div class="comment-list">${comments.map(comment=>`<article class="comment-item"><div class="comment-avatar">${safe(initials(comment.author||'?'))}</div><div class="comment-content"><div class="comment-meta"><strong>${safe(comment.author||'Người dùng')}</strong><time>${safe(comment.at?new Date(comment.at).toLocaleString('vi-VN',{dateStyle:'short',timeStyle:'short'}):'')}</time></div><p>${safe(comment.text)}</p></div></article>`).join('')}</div>`:'<p class="detail-empty">Chưa có bình luận. Hãy bắt đầu trao đổi về công việc này.</p>'}<form class="comment-form" data-detail-form="comment"><div class="comment-input-wrap"><textarea class="field" name="text" rows="2" maxlength="2000" minlength="1" required placeholder="Viết bình luận..."></textarea><div class="comment-emoji-row"><button type="button" data-comment-emoji="😊" aria-label="Chèn mặt cười">😊</button><button type="button" data-comment-emoji="✅" aria-label="Chèn dấu hoàn thành">✅</button><button type="button" data-comment-emoji="🙏" aria-label="Chèn lời cảm ơn">🙏</button><label class="task-attach-button" title="Đính kèm tài liệu">📎<input type="file" data-task-attachment="comment" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.csv,.docx,.xlsx" hidden></label></div></div><button class="btn btn-primary" type="submit">${ic('send')} Gửi</button></form>${taskAttachmentsHTML(t,'comment')}</section></div><div class="detail-side-col"><div class="detail-action-card"><div class="detail-action-title">${ic('activity',15)} Thao tác thực hiện</div><div class="detail-action-buttons">${actions.join('')||'<span class="small muted">Không có thao tác khả dụng với trạng thái và vai trò hiện tại.</span>'}</div><div style="margin-top:14px"><div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:12px"><span class="small muted">Tiến độ hiện tại</span><strong>${fmtNum(t.progress)}%</strong></div><div class="progressbar" style="width:100%"><span style="width:${t.progress}%"></span></div></div></div><div class="detail-side-props"><div class="kv"><small>Phụ trách</small><strong>${safe(t.assignee)}</strong></div><div class="kv"><small>Người giao</small><strong>${safe(t.creator)}</strong></div><div class="kv"><small>Chỉ tiêu KPI</small>${canEdit&&t.status!=='COMPLETED'?`<form data-detail-form="kpi" style="margin-top:4px"><select class="field small-field" name="kpi_id" data-detail-kpi-select style="font-size:12px;padding:3px 6px"><option value="">-- Chưa gắn KPI --</option>${(state.departmentKpis||[]).map(k=>`<option value="${safe(k.id)}" ${k.id===t.kpi_id?'selected':''}>[${safe(k.code||k.id)}] ${safe(k.name)}</option>`).join('')}</select></form>`:`<strong>${t.kpi_id?`[${safe(t.kpi_id)}] ${safe(t.kpi_name||'')}`:'<span class=\"muted\">Chưa gắn KPI</span>'}</strong>`}</div><div class="kv"><small>Bắt đầu</small><strong>${dateHuman(t.start_date)}</strong></div><div class="kv"><small>Hạn xử lý</small><strong>${deadlineHuman(t)}</strong>${hasExtensions?`<div style="margin-top:4px"><span class="tag late" style="font-size:10.5px">Đã gia hạn ${t.extensions_count} lần (Hạn gốc: ${dateHuman(t.original_due||t.due)})</span></div>`:''}${canEdit&&t.status!=='COMPLETED'?(requiresFormalExtension?`<button type="button" class="btn btn-min" style="margin-top:6px;width:100%;font-size:11px" data-action="open-extend-modal">${ic('clock',13)} Xin gia hạn (có lý do)</button>`:`<form data-detail-form="quick-due" style="margin-top:6px;display:flex;flex-direction:column;gap:4px"><div style="display:flex;gap:4px"><input class="field small-field" type="date" name="due" value="${safe(t.due)}" required style="font-size:11px;padding:3px 6px"><input class="field small-field" type="time" name="due_time" value="${safe(t.due_time||'')}" style="font-size:11px;padding:3px 6px;max-width:85px"></div><button class="btn btn-min" type="submit" style="font-size:11px;padding:3px 8px">${ic('check',11)} Đổi hạn nhanh</button></form>`):''}</div><div class="kv"><small>Ưu tiên</small><span class="tag ${priorities[t.priority]}">${priority[t.priority]}</span></div><div class="kv"><small>Nghiệm thu</small><strong>${t.review?'Có':'Không'}</strong></div></div><section class="detail-section"><div class="detail-section-head"><h3 class="detail-history-title">Check-in tiến độ</h3></div><div class="checkin-list">${(t.checkins?.length?t.checkins.slice().reverse().map(c=>`<div class="checkin-box"><strong class="small">${fmtNum(c.pct)}% · ${dateHuman(c.at)}</strong><div class="small muted">${safe(c.text)}</div></div>`).join(''):'<p class="small muted">Chưa có check-in nào.</p>')}</div></section><section class="detail-section"><div class="detail-section-head"><h3 class="detail-history-title">Lịch sử xử lý</h3></div><div class="history">${(t.events?.length?t.events.slice().reverse().map(e=>`<div class="history-item">${safe(e.text)}<div class="muted">${safe(e.actor)} · ${dateHuman(e.at)}</div></div>`).join(''):'<div class="history-item">Đã khởi tạo công việc</div>')}</div></section>${!canEdit?'<div class="ai-tip"><div class="tip-icon">'+ic('info')+'</div><div class="small">Bạn chỉ có thể thêm bình luận. Chỉnh sửa mô tả, kết quả và công việc con dành cho người giao, người thực hiện hoặc người quản lý.</div></div>':''}</div></div></aside>`}
+function modalHTML(){if(state.modal==='create'){return `<div class="modal-backdrop" data-action="modal-close"></div><div class="modal" role="dialog" aria-modal="true" aria-label="Tạo công việc"><div class="modal-head"><h2>Tạo công việc</h2><button class="icon-btn" data-action="modal-close" aria-label="Đóng">${ic('close')}</button></div><form id="createTask"><div class="modal-body"><label class="formlabel" for="title">Tên công việc *</label><input class="field" id="title" name="title" minlength="4" maxlength="160" required placeholder="Ví dụ: Rà soát KPI tháng 10" autofocus><label class="formlabel" for="project">Dự án</label><select class="field" id="project" name="project">${[...new Set([...state.tasks.map(t=>t.project),'Công việc độc lập'])].map(x=>`<option>${safe(x)}</option>`).join('')}</select><label class="formlabel" for="create_kpi_id">Chỉ tiêu KPI phòng ban</label><select class="field" id="create_kpi_id" name="kpi_id"><option value="">-- Không gắn KPI / Thường quy --</option>${(state.departmentKpis||[]).map(k=>`<option value="${safe(k.id)}">[${safe(k.code||k.id)}] ${safe(k.name)} (${safe(k.category||'')})</option>`).join('')}</select><div class="field-row task-date-fields"><div><label class="formlabel" for="start_date">Thời gian bắt đầu *</label><input class="field" id="start_date" name="start_date" required type="date" value="${addDays(0)}"></div><div class="task-deadline-fields"><label><span class="formlabel">Hạn hoàn thành *</span><input class="field" id="due" name="due" required type="date" value="${addDays(7)}"></label><label><span class="formlabel">Giờ (tùy chọn)</span><input class="field" id="due_time" name="due_time" type="time"></label></div></div><label class="formlabel" for="employee-search-create">Người thực hiện *</label>${employeePickerMarkup('create')}<div class="field-row"><div><label class="formlabel" for="prio">Ưu tiên</label><select class="field" id="prio" name="priority"><option value="MEDIUM">Trung bình</option><option value="HIGH">Cao</option><option value="LOW">Thấp</option></select></div><div><label class="formlabel" for="progress">Tiến độ ban đầu</label><input class="field" id="progress" disabled value="0% (khi tạo)"></div></div><label class="checkline"><input type="checkbox" name="review" checked> Cần phê duyệt kết quả trước khi hoàn thành</label><label class="formlabel" for="reviewer_id">Người nghiệm thu *</label><select class="field" id="reviewer_id" name="reviewer_id" required><option value="">Chọn người nghiệm thu</option>${state.reviewerUsers.map(user=>`<option value="${safe(user.id)}">${safe(user.name)} · ${safe(user.role_label)}</option>`).join('')}</select><div class="small muted" style="margin-top:15px">${state.reviewerUsers.length?'Người nghiệm thu phải đang hoạt động, có quyền duyệt và nằm trong phạm vi của công việc.':'Chưa có tài khoản đang hoạt động được cấp quyền nghiệm thu. Bạn có thể bỏ chọn yêu cầu nghiệm thu để dùng luồng hoàn thành demo hiện hành.'} Chọn rõ người thực hiện và người nghiệm thu trước khi tạo.</div></div><div class="modal-footer"><button class="btn" type="button" data-action="modal-close">Hủy</button><button class="btn btn-primary" type="submit">${ic('plus')} Tạo công việc</button></div></form></div>`}
+ if(state.modal==='extend'){const t=state.tasks.find(x=>x.id===state.detail);if(!t)return '';const currentDue=t.due||localDateString(new Date());return `<div class="modal-backdrop" data-action="modal-close"></div><div class="modal" role="dialog" aria-modal="true" aria-label="Gia hạn công việc"><div class="modal-head"><h2>${ic('clock',18)} Yêu cầu gia hạn công việc</h2><button class="icon-btn" data-action="modal-close">${ic('close')}</button></div><form id="extendTaskForm"><div class="modal-body"><div class="ai-tip" style="margin-bottom:14px"><div class="tip-icon">${ic('info',18)}</div><div class="small">Công việc <strong>“${safe(t.title)}”</strong> thuộc dự án / ưu tiên cao / quá hạn. Cần giải trình lý do chính đáng để lưu vết audit log.</div></div><div class="kv" style="margin-bottom:12px;background:var(--card-subtle);padding:8px 12px;border-radius:6px"><small>Hạn hiện tại:</small><strong>${deadlineHuman(t)} ${t.original_due?`(Hạn ban đầu: ${dateHuman(t.original_due)})`:''}</strong></div><div class="field-row"><div><label class="formlabel" for="extend_due">Hạn mới đề xuất *</label><input class="field" id="extend_due" name="new_due" type="date" required min="${currentDue}" value="${addDays(3)}"></div><div><label class="formlabel" for="extend_due_time">Giờ mới (tùy chọn)</label><input class="field" id="extend_due_time" name="new_due_time" type="time" value="${safe(t.due_time||'')}"></div></div><label class="formlabel" for="reason_preset">Nhóm lý do gia hạn *</label><select class="field" id="reason_preset" name="reason_preset" required><option value="Chờ phụ thuộc bên thứ ba / đối tác">Chờ phụ thuộc bên thứ ba / đối tác</option><option value="Phát sinh yêu cầu kỹ thuật phức tạp">Phát sinh yêu cầu kỹ thuật phức tạp</option><option value="Thay đổi phạm vi / yêu cầu từ cấp trên">Thay đổi phạm vi / yêu cầu từ cấp trên</option><option value="Ưu tiên xử lý sự cố khẩn cấp khác">Ưu tiên xử lý sự cố khẩn cấp khác</option><option value="Lý do khác">Lý do khác (ghi rõ bên dưới)</option></select><label class="formlabel" for="reason_detail">Giải trình chi tiết * (tối thiểu 10 ký tự)</label><textarea class="field" id="reason_detail" name="reason_detail" required minlength="10" maxlength="1000" rows="3" placeholder="Nêu rõ vướng mắc cụ thể và phương án khắc phục..."></textarea></div><div class="modal-footer"><button class="btn" data-action="modal-close" type="button">Hủy</button><button class="btn btn-primary" type="submit">${ic('check')} Xác nhận gia hạn</button></div></form></div>`}
  if(state.modal==='checkin')return `<div class="modal-backdrop" data-action="modal-close"></div><div class="modal" role="dialog" aria-modal="true" aria-label="Check-in tiến độ"><div class="modal-head"><h2>Cập nhật check-in</h2><button class="icon-btn" data-action="modal-close">${ic('close')}</button></div><form id="checkinTask"><div class="modal-body"><label class="formlabel" for="pct">Tiến độ (%) *</label><input id="pct" name="pct" class="field" type="number" min="0" max="100" required value="${state.tasks.find(t=>t.id===state.detail)?.progress||0}"><label class="formlabel" for="comment">Kết quả / vướng mắc *</label><textarea class="field" id="comment" name="comment" required minlength="5" placeholder="Mô tả đã làm được gì, cần hỗ trợ gì..."></textarea><div class="small muted">Bản Demo ghi nhận nội dung check-in, không tải tệp lên máy chủ.</div></div><div class="modal-footer"><button class="btn" type="button" data-action="modal-close">Hủy</button><button class="btn btn-primary" type="submit">Lưu check-in</button></div></form></div>`;
  if(state.modal==='reject')return `<div class="modal-backdrop" data-action="modal-close"></div><div class="modal" role="dialog" aria-modal="true" aria-label="Trả lại kết quả"><div class="modal-head"><h2>Trả lại kết quả</h2><button class="icon-btn" data-action="modal-close">${ic('close')}</button></div><form id="rejectTask"><div class="modal-body"><label class="formlabel" for="reason">Lý do trả lại *</label><textarea class="field" id="reason" name="reason" required minlength="5" placeholder="Nêu rõ thông tin hoặc bằng chứng cần bổ sung..."></textarea><p class="small muted">Công việc chuyển về Đang thực hiện. Lịch sử đánh giá được giữ lại.</p></div><div class="modal-footer"><button class="btn" data-action="modal-close" type="button">Hủy</button><button class="btn btn-danger" type="submit">Trả lại công việc</button></div></form></div>`;
  return ''}
-function taskDraftHTML(){const draft=state.pendingTaskDraft;if(!draft)return '';return `<section class="task-draft" aria-label="Nháp công việc"><strong>Nháp công việc chờ xác nhận</strong><div><span>Công việc:</span> ${safe(draft.title)}</div><div><span>Người nhận:</span></div><label class="formlabel" for="employee-search-draft">Tìm và xác nhận nhân viên *</label>${employeePickerMarkup('draft',draft.assigneeId)}<div><span>Dự án:</span> ${safe(draft.project)}</div><div><span>Thời gian bắt đầu:</span> ${dateHuman(draft.start_date)}</div><div><span>Hạn hoàn thành:</span> ${deadlineHuman(draft)} <span class="muted">(${safe(draft.dueNote)})</span></div><div class="task-draft-options"><label class="task-draft-option"><span>Ưu tiên</span><select class="field" aria-label="Chọn mức ưu tiên" data-draft-field="priority"><option value="LOW" ${draft.priority==='LOW'?'selected':''}>Thấp</option><option value="MEDIUM" ${draft.priority==='MEDIUM'?'selected':''}>Trung bình</option><option value="HIGH" ${draft.priority==='HIGH'?'selected':''}>Cao</option></select></label><label class="task-draft-option"><span>Nghiệm thu</span><select class="field" aria-label="Chọn yêu cầu nghiệm thu" data-draft-field="review"><option value="true" ${draft.review?'selected':''}>Cần nghiệm thu</option><option value="false" ${draft.review?'':'selected'}>Không cần nghiệm thu</option></select></label></div><div class="small muted">Chỉ người đang hoạt động trong phạm vi được giao việc mới xuất hiện. Kiểm tra lại người nhận trước khi xác nhận giao việc.</div><div class="task-draft-actions"><button type="button" class="btn" data-action="cancel-task-draft">Hủy nháp</button><button type="button" class="btn btn-primary" data-action="confirm-task-draft" ${draft.assigneeId?'':'disabled'}>${ic('check')} Xác nhận giao việc</button></div></section>`}
-function aiHTML(){return `<div class="panel-backdrop" data-action="ai-close"></div><aside class="ai-panel" role="dialog" aria-modal="true" aria-label="Trợ lý công việc"><div class="ai-header"><div><strong>${ic('sparkles',19)} Trợ lý công việc · BFC</strong><small>Soạn nháp từ prompt · Quản lý xác nhận trước khi lưu</small></div><button class="icon-btn" data-action="ai-close" aria-label="Đóng trợ lý">${ic('close')}</button></div><div class="ai-body" id="chatBody"><div class="ai-bubble bot">Mô tả công việc, người thực hiện và hạn, ví dụ: “Tạo công việc phân tích workflow cho nhân viên Phạm Hoàng Tuấn, hạn thứ hai tuần sau 4h30”. “4h” được hiểu là 04:00; ghi “4h chiều” nếu muốn 16:00. Tôi sẽ soạn nháp để bạn kiểm tra trước khi giao.</div><div class="ai-suggestions"><button class="suggestion" data-prompt="Công việc quá hạn">Công việc quá hạn</button><button class="suggestion" data-prompt="Công việc chờ duyệt">Công việc chờ duyệt</button><button class="suggestion" data-prompt="Báo cáo tiến độ">Báo cáo tiến độ</button></div>${state.aiMessages.map(m=>`<div class="ai-bubble ${m.who}">${safe(m.text)}</div>`).join('')}${taskDraftHTML()}</div><form class="ai-input" id="aiForm"><input class="field" id="aiQuery" autocomplete="off" aria-label="Nhập prompt giao việc" placeholder="Ví dụ: tạo việc ... cho nhân viên ... hạn mai 4h30" required><button class="btn btn-primary" aria-label="Gửi" type="submit">${ic('send')}</button></form><div class="ai-foot">Hiện chạy quy tắc cục bộ, chưa kết nối mô hình AI. Chưa lưu hoặc giao việc cho tới khi bạn xác nhận.</div></aside>`}
+function mascotHTML(){
+ if(isAdminView()||state.ai||state.detail)return '';
+ const briefing=state.aiBriefing;
+ const count=briefing?.attention_count||0;
+ const overdueCount=briefing?.overdue_count||0;
+ const urgentCount=briefing?.urgent_count||0;
+ const dueTodayCount=briefing?.due_today_count||0;
+ const hasAlert=count>0;
+
+ let quoteText='Hôm nay bạn làm rất tốt! Cùng bứt phá nhé! ✨';
+ if(overdueCount>0){
+  quoteText=`Cố lên nhé! Bạn có <strong>${overdueCount} việc quá hạn</strong> cần xử lý 💪`;
+ }else if(urgentCount>0){
+  quoteText=`Tập trung nào! Có <strong>${urgentCount} việc ưu tiên cao</strong> hôm nay 🚀`;
+ }else if(dueTodayCount>0){
+  quoteText=`Hôm nay có <strong>${dueTodayCount} việc đến hạn</strong>. Cùng hoàn thành nhé! 📅`;
+ }else if(count>0){
+  quoteText=`Có <strong>${count} việc</strong> cần chú ý. Tôi luôn đồng hành cùng bạn! 💡`;
+ }
+
+ let savedPos='';
+ try{
+  const p=JSON.parse(localStorage.getItem('bfc_mascot_pos')||'null');
+  if(p&&typeof p.left==='number'&&typeof p.top==='number'){
+   savedPos=`style="left:${p.left}px;top:${p.top}px;right:auto;bottom:auto;"`;
+  }
+ }catch{}
+
+ return `<div class="ai-mascot-widget ${hasAlert?'has-attention':''} ${state.aiLoadingBriefing?'is-loading':''}" ${savedPos} data-action="ai" role="button" tabindex="0" aria-label="Mở Trợ lý AI BFC">
+  <div class="ai-mascot-speech" title="Nhấp để mở Trợ lý AI">
+   <span class="ai-mascot-speech-icon">${ic('sparkles',12)}</span>
+   <span class="ai-mascot-speech-text">${quoteText}</span>
+  </div>
+  <div class="ai-mascot-avatar">
+   <div class="mascot-halo"></div>
+   ${hasAlert?`<div class="ai-mascot-badge" title="${count} việc cần chú ý"><span class="badge-dot"></span><span class="badge-num">${count>99?'99+':count}</span></div>`:''}
+   <svg class="mascot-svg" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+     <linearGradient id="mHeadGrad" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="25%" stop-color="#EDE7F6"/>
+      <stop offset="70%" stop-color="#9C27B0"/>
+      <stop offset="100%" stop-color="#5E1B5A"/>
+     </linearGradient>
+     <linearGradient id="mBodyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="50%" stop-color="#E1BEE7"/>
+      <stop offset="100%" stop-color="#7C2A76"/>
+     </linearGradient>
+     <linearGradient id="mVisorGrad" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#1A1A2E"/>
+      <stop offset="100%" stop-color="#080814"/>
+     </linearGradient>
+     <linearGradient id="mEyeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00E5FF"/>
+      <stop offset="100%" stop-color="#18FFFF"/>
+     </linearGradient>
+     <linearGradient id="mGoldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD54F"/>
+      <stop offset="50%" stop-color="#FF9800"/>
+      <stop offset="100%" stop-color="#CD8B2D"/>
+     </linearGradient>
+     <filter id="mCyanGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="1.8" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+     </filter>
+    </defs>
+    <!-- Vòng đệm từ trường chống trọng lực -->
+    <ellipse cx="40" cy="73" rx="18" ry="4" fill="#00E5FF" opacity="0.4" filter="url(#mCyanGlow)"/>
+    <ellipse cx="40" cy="71" rx="14" ry="3" fill="#B388FF" opacity="0.6"/>
+    <!-- Thân robot nhỏ gọn -->
+    <rect x="26" y="44" width="28" height="22" rx="11" fill="url(#mBodyGrad)" stroke="#B388FF" stroke-width="1.2"/>
+    <!-- Lõi năng lượng ngực robot BFC Arc Core -->
+    <circle cx="40" cy="55" r="5" fill="#0D0D19"/>
+    <polygon class="mascot-reactor-core" points="40,51 43.5,55 40,59 36.5,55" fill="url(#mGoldGrad)" filter="url(#mCyanGlow)"/>
+    <!-- Tay trái -->
+    <rect x="19" y="48" width="6" height="12" rx="3" fill="url(#mBodyGrad)" stroke="#9C27B0" stroke-width="1"/>
+    <!-- Tay phải vẫy chào -->
+    <g class="mascot-wave-arm">
+     <rect x="55" y="42" width="6" height="13" rx="3" fill="url(#mBodyGrad)" stroke="#9C27B0" stroke-width="1"/>
+     <circle cx="58" cy="40" r="3.5" fill="url(#mGoldGrad)"/>
+    </g>
+    <!-- Ăng-ten quả cầu trí tuệ -->
+    <line x1="40" y1="18" x2="40" y2="10" stroke="#CD8B2D" stroke-width="2.2" stroke-linecap="round"/>
+    <circle cx="40" cy="8" r="4" fill="#00E5FF" filter="url(#mCyanGlow)"/>
+    <circle cx="39" cy="7" r="1.5" fill="#FFFFFF"/>
+    <!-- Tai nghe Cyber 2 bên -->
+    <rect x="10" y="24" width="6" height="16" rx="3" fill="url(#mGoldGrad)"/>
+    <rect x="64" y="24" width="6" height="16" rx="3" fill="url(#mGoldGrad)"/>
+    <circle cx="13" cy="32" r="2" fill="#00E5FF"/>
+    <circle cx="67" cy="32" r="2" fill="#00E5FF"/>
+    <!-- Đầu robot mũ bảo hộ 3D bo tròn -->
+    <rect x="14" y="16" width="52" height="38" rx="19" fill="url(#mHeadGrad)" stroke="#D1C4E9" stroke-width="1.8"/>
+    <!-- Highlight vòm kính mũ -->
+    <path d="M 22 20 Q 40 14 58 20" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" opacity="0.6"/>
+    <!-- Kính Visor OLED cong 3D -->
+    <rect x="19" y="23" width="42" height="24" rx="12" fill="url(#mVisorGrad)" stroke="#7C2A76" stroke-width="1.2"/>
+    <path d="M 23 27 Q 40 23 57 27" stroke="#4A148C" stroke-width="1.2" opacity="0.7"/>
+    <!-- Đôi mắt LED Cyan Biểu Cảm Chớp Mắt -->
+    <g class="mascot-eye">
+     <path d="M 27 34 Q 32 30 37 34" stroke="url(#mEyeGrad)" stroke-width="3.5" stroke-linecap="round" filter="url(#mCyanGlow)"/>
+     <circle cx="32" cy="31.5" r="1.5" fill="#FFFFFF"/>
+     <path d="M 43 34 Q 48 30 53 34" stroke="url(#mEyeGrad)" stroke-width="3.5" stroke-linecap="round" filter="url(#mCyanGlow)"/>
+     <circle cx="48" cy="31.5" r="1.5" fill="#FFFFFF"/>
+    </g>
+    <!-- Má hồng công nghệ phấn khởi -->
+    <ellipse cx="25" cy="39" rx="2.5" ry="1.2" fill="#FF4081" opacity="0.75"/>
+    <ellipse cx="55" cy="39" rx="2.5" ry="1.2" fill="#FF4081" opacity="0.75"/>
+    <!-- Nụ cười LED tinh nghịch -->
+    <path d="M 37 39 Q 40 42 43 39" stroke="url(#mEyeGrad)" stroke-width="1.8" stroke-linecap="round"/>
+   </svg>
+  </div>
+  <div class="ai-mascot-label">
+   <span>Bot AI</span>
+  </div>
+ </div>`;
+}
+function taskDraftHTML(){
+ const draft=state.pendingTaskDraft;if(!draft)return '';
+ const reviewers=state.reviewerUsers||[];
+ const projectOptions=(state.projects||[]).map(p=>`<option value="${safe(p.id)}" ${(draft.project_id===p.id||draft.project===p.name)?'selected':''}>${safe(p.name)}</option>`).join('');
+ const reviewerOptions=reviewers.map(r=>`<option value="${safe(r.id)}" ${draft.reviewer_id===r.id?'selected':''}>${safe(r.name)} (${safe(r.role_label)})</option>`).join('');
+ const isSelf=draft.assigneeId===meUser()?.id;
+ const canAssign=canAssignTasks()||(state.permissions.includes('tasks.create')&&isSelf);
+ return `<section class="task-draft" aria-label="Nháp công việc">
+  <strong>${ic('sparkles',16)} Nháp công việc chờ xác nhận</strong>
+  <div><span>Công việc:</span> <strong>${safe(draft.title)}</strong></div>
+  <div><span>Người nhận:</span></div>
+  <label class="formlabel" for="employee-search-draft">Tìm và xác nhận nhân viên *</label>
+  ${employeePickerMarkup('draft',draft.assigneeId)}
+  <div style="margin-top:10px">
+   <label class="task-draft-option">
+    <span>Dự án</span>
+    <select class="field" data-draft-field="project_id" aria-label="Chọn dự án">
+     <option value="">-- Công việc độc lập --</option>
+     ${projectOptions}
+    </select>
+   </label>
+  </div>
+  <div style="margin-top:10px">
+   <label class="task-draft-option">
+    <span>Chỉ tiêu KPI</span>
+    <select class="field" data-draft-field="kpi_id" aria-label="Chọn chỉ tiêu KPI">
+     <option value="">-- Không gắn KPI / Thường quy --</option>
+     ${(state.departmentKpis||[]).map(k=>`<option value="${safe(k.id)}" ${draft.kpi_id===k.id?'selected':''}>[${safe(k.code||k.id)}] ${safe(k.name)}</option>`).join('')}
+    </select>
+   </label>
+   ${draft.kpi_id?`<div class="small muted" style="margin-top:4px;color:var(--brand-primary);display:flex;align-items:center;gap:4px">${ic('sparkles',13)} <span>AI đã khớp KPI phòng ban: <strong>[${safe(draft.kpi_id)}]</strong></span></div>`:''}
+  </div>
+  <div><span>Thời gian bắt đầu:</span> ${dateHuman(draft.start_date)}</div>
+  <div><span>Hạn hoàn thành:</span> ${deadlineHuman(draft)} <span class="muted">(${safe(draft.dueNote)})</span></div>
+  <div class="task-draft-options">
+   <label class="task-draft-option">
+    <span>Ưu tiên</span>
+    <select class="field" aria-label="Chọn mức ưu tiên" data-draft-field="priority">
+     <option value="LOW" ${draft.priority==='LOW'?'selected':''}>Thấp</option>
+     <option value="MEDIUM" ${draft.priority==='MEDIUM'?'selected':''}>Trung bình</option>
+     <option value="HIGH" ${draft.priority==='HIGH'?'selected':''}>Cao</option>
+    </select>
+   </label>
+   <label class="task-draft-option">
+    <span>Nghiệm thu</span>
+    <select class="field" aria-label="Chọn yêu cầu nghiệm thu" data-draft-field="review">
+     <option value="false" ${draft.review?'':'selected'}>Không cần nghiệm thu</option>
+     <option value="true" ${draft.review?'selected':''}>Cần nghiệm thu</option>
+    </select>
+   </label>
+  </div>
+  ${draft.review?`<div style="margin-top:8px"><label class="task-draft-option"><span>Người nghiệm thu</span><select class="field" data-draft-field="reviewer_id" aria-label="Chọn người nghiệm thu"><option value="">-- Chọn người nghiệm thu --</option>${reviewerOptions}</select></label></div>`:''}
+  ${draft.subtasks&&draft.subtasks.length?`<div class="draft-subtasks"><strong>${ic('list',14)} Đầu việc con bóc tách (${draft.subtasks.length}):</strong>${draft.subtasks.map((s,i)=>`<div class="draft-subtask-item">${i+1}. ${safe(s.title)}</div>`).join('')}</div>`:''}
+  <div class="small muted" style="margin-top:8px">${isSelf?'Bạn đang tạo công việc cho chính mình.':'Kiểm tra lại người nhận trước khi xác nhận giao việc.'}</div>
+  <div class="task-draft-actions">
+   <button type="button" class="btn" data-action="cancel-task-draft">Hủy nháp</button>
+   <button type="button" class="btn btn-primary" data-action="confirm-task-draft" ${draft.assigneeId&&canAssign?'':'disabled'}>${ic('check')} ${isSelf?'Xác nhận tạo việc':'Xác nhận giao việc'}</button>
+  </div>
+ </section>`;
+}
+function aiHTML(){
+ const briefing=state.aiBriefing;
+ const currentTab=state.aiBriefingTab||'all';
+ let activeTasks=[];
+ let tabTitle='Toàn bộ việc cần chú ý';
+ if(currentTab==='overdue'){
+  activeTasks=briefing?.overdue_tasks||(state.tasks||[]).filter(overdue);
+  tabTitle=`Danh sách công việc quá hạn (${activeTasks.length})`;
+ }else if(currentTab==='urgent'){
+  activeTasks=briefing?.urgent_tasks||(state.tasks||[]).filter(t=>['HIGH','URGENT'].includes(t.priority)&&t.status!=='COMPLETED');
+  tabTitle=`Danh sách công việc gấp (Ưu tiên cao) (${activeTasks.length})`;
+ }else if(currentTab==='today'){
+  activeTasks=briefing?.due_today_tasks||[];
+  tabTitle=`Danh sách công việc đến hạn hôm nay (${activeTasks.length})`;
+ }else{
+  activeTasks=briefing?.all_critical_tasks||briefing?.critical_tasks||[];
+  tabTitle=`Toàn bộ công việc cần chú ý (${activeTasks.length})`;
+ }
+
+ return `<div class="panel-backdrop ${state.aiOpening?'backdrop-anim':''}" data-action="ai-close"></div>
+ <aside class="ai-panel ${state.aiOpening?'ai-panel-slide':''}" role="dialog" aria-modal="true" aria-label="Trợ lý công việc">
+  <div class="ai-header">
+   <div style="display:flex;align-items:center;gap:12px">
+    <div style="width:38px;height:38px;border-radius:50%;background:#5E1B5A;display:grid;place-items:center;box-shadow:0 0 12px rgba(0,229,255,0.45)">
+     <svg width="26" height="26" viewBox="0 0 80 80" fill="none">
+      <circle cx="40" cy="40" r="32" fill="#7C2A76"/>
+      <rect x="22" y="24" width="36" height="26" rx="10" fill="#0B0C1E"/>
+      <path d="M 28 36 Q 32 32 36 36" stroke="#00E5FF" stroke-width="2.8" stroke-linecap="round"/>
+      <path d="M 44 36 Q 48 32 52 36" stroke="#00E5FF" stroke-width="2.8" stroke-linecap="round"/>
+      <polygon points="40,54 43,57 40,60 37,57" fill="#FF9800"/>
+     </svg>
+    </div>
+    <div>
+     <strong>Trợ lý AI BFC · Smart Work</strong>
+     <small>${safe(meName())} · ${safe(state.authUser?.role_label)}</small>
+    </div>
+   </div>
+   <button class="icon-btn" data-action="ai-close" aria-label="Đóng trợ lý">${ic('close')}</button>
+  </div>
+  <div class="ai-body" id="chatBody">
+   ${briefing?`<div class="ai-briefing-card">
+    <div class="briefing-head">
+     <div class="briefing-title">${ic('sparkles',16)} <span>Điểm tin thông minh</span></div>
+     <button type="button" class="btn btn-min" data-action="refresh-briefing" style="font-size:11px;padding:2px 8px">${ic('activity',13)} Cập nhật</button>
+    </div>
+    ${briefing.memory_note?`<div class="briefing-memory-note">${safe(briefing.memory_note)}</div>`:''}
+    <div class="briefing-stats" role="tablist" aria-label="Lọc nhanh việc cần chú ý">
+     <button type="button" class="briefing-pill all ${currentTab==='all'?'is-active':''}" data-action="briefing-tab" data-tab="all" title="Xem tất cả việc cần chú ý">
+      ${ic('target',13)} Tất cả (${briefing.attention_count||0})
+     </button>
+     ${briefing.overdue_count>0?`<button type="button" class="briefing-pill overdue ${currentTab==='overdue'?'is-active':''}" data-action="briefing-tab" data-tab="overdue" title="Bấm để xem danh sách việc quá hạn">
+      ${ic('alert',13)} ${briefing.overdue_count} quá hạn
+     </button>`:''}
+     ${briefing.urgent_count>0?`<button type="button" class="briefing-pill urgent ${currentTab==='urgent'?'is-active':''}" data-action="briefing-tab" data-tab="urgent" title="Bấm để xem danh sách việc gấp">
+      ${ic('clock',13)} ${briefing.urgent_count} việc gấp
+     </button>`:''}
+     ${briefing.due_today_count>0?`<button type="button" class="briefing-pill today ${currentTab==='today'?'is-active':''}" data-action="briefing-tab" data-tab="today" title="Bấm để xem danh sách việc hạn hôm nay">
+      ${ic('check',13)} ${briefing.due_today_count} hạn hôm nay
+     </button>`:''}
+    </div>
+    <div class="briefing-list-header">
+     <span>${safe(tabTitle)}</span>
+     <small class="muted">Nhấp vào việc để mở chi tiết</small>
+    </div>
+    <div class="briefing-critical-list">
+     ${activeTasks.length?activeTasks.map(t=>`<div class="briefing-task-item" data-action="open-briefing-task" data-id="${safe(t.id)}">
+      <div class="task-item-main">
+       <strong>${safe(t.title)}</strong>
+       <div class="task-item-meta">
+        <span>${safe(t.project||'Công việc độc lập')}</span>
+        <span>·</span>
+        <span>${safe(t.assignee)}</span>
+       </div>
+      </div>
+      <div class="briefing-task-action">
+       <span class="tag ${tagClass[t.status]||'todo'}">${deadlineHuman(t)}</span>
+       ${ic('arrow-right',13)}
+      </div>
+     </div>`).join(''):'<div class="small muted" style="padding:10px;text-align:center">Không có công việc nào trong mục này.</div>'}
+    </div>
+    ${activeTasks.length?`<button type="button" class="btn briefing-jump-btn" data-action="filter-main-tasks" data-filter="${safe(currentTab)}">
+     ${ic('list',13)} Xem nhóm này trên bảng công việc chính ${ic('arrow-right',13)}
+    </button>`:''}
+   </div>`:''}
+   <div class="ai-suggestions">
+    <button class="suggestion" data-prompt="Hôm nay tôi cần làm gì?">Hôm nay tôi cần làm gì?</button>
+    <button class="suggestion" data-prompt="Việc ưu tiên cao nào chưa xong?">Việc ưu tiên cao</button>
+    <button class="suggestion" data-prompt="Công việc quá hạn">Việc quá hạn</button>
+    <button class="suggestion" data-prompt="Tiến độ các dự án">Tiến độ dự án</button>
+   </div>
+   ${state.aiMessages.map(m=>`<div class="ai-bubble ${m.who}">${safe(m.text)}</div>`).join('')}
+   ${state.aiThinking?`<div class="ai-thinking"><span>Trợ lý AI đang xử lý</span><div class="ai-thinking-dots"><span></span><span></span><span></span></div></div>`:''}
+   ${taskDraftHTML()}
+  </div>
+  <form class="ai-input" id="aiForm">
+   <input class="field" id="aiQuery" autocomplete="off" aria-label="Nhập prompt giao việc" placeholder="Ví dụ: tạo việc ... cho nhân viên ... hạn mai 4h30" required ${state.aiThinking?'disabled':''}>
+   <button class="btn btn-primary" aria-label="Gửi" type="submit" ${state.aiThinking?'disabled':''}>${ic('send')}</button>
+  </form>
+  <div class="ai-foot">Zero-Trust RBAC: Chỉ truy xuất dữ liệu trong phạm vi của bạn. Kết nối OpenAI / Bộ phân tích dữ liệu cục bộ.</div>
+ </aside>`;
+}
 function authPage(){
  const register=state.authScreen==='register',pending=state.authScreen==='pending';
  const registrationFields=register?`<label class="formlabel" for="authName">Họ và tên *</label><input class="field" id="authName" name="name" minlength="2" maxlength="120" required><label class="formlabel" for="authDepartment">Phòng ban *</label><input class="field" id="authDepartment" name="department" maxlength="120" required><label class="formlabel" for="authTitle">Chức vụ dự kiến</label><input class="field" id="authTitle" name="job_title" maxlength="120">`:'';
@@ -418,8 +730,143 @@ function aiReplyScoped(q){const text=normalizeForMatch(q).text,tasks=visibleTask
  if(/duyet|nghiem thu|review/.test(text)){const review=tasks.filter(task=>task.status==='IN_REVIEW');return `Có ${review.length} công việc chờ duyệt trong phạm vi hồ sơ hiện tại.\n${review.map(task=>`• ${task.title} — ${task.assignee}`).join('\n')||'Không có công việc chờ duyệt.'}`}
  if(/bao cao|tien do|tong hop|kpi/.test(text))return `Tổng hợp trong phạm vi ${meName()}:\n• ${s.all} công việc\n• ${s.active} đang thực hiện\n• ${s.review} chờ duyệt\n• ${s.done} đã hoàn thành\n• ${s.overdue} quá hạn\nXem các KPI riêng theo tháng tại mục Mục tiêu & KPI.`;
  return 'Hãy mô tả công việc, người nhận và hạn theo cách tự nhiên, ví dụ: “Tạo công việc phân tích workflow cho nhân viên Phạm Hoàng Tuấn, hạn thứ hai tuần sau 4h30”. “4h” là 04:00; thêm “chiều” để chỉ buổi chiều.'}
-function confirmTaskDraft(){const draft=state.pendingTaskDraft;if(!draft)return;if(!canAssignTasks()){toast('Hồ sơ hiện tại không còn quyền giao việc.');return}if(!draft.assigneeId){toast('Hãy tìm và chọn rõ người nhận trước khi xác nhận.');return}if(!state.users.some(user=>user.id===draft.assigneeId&&user.name===draft.assignee)){toast('Người nhận không còn trong danh sách người dùng được phép giao việc. Hãy chọn lại người nhận.');draft.assigneeId='';draft.assignee='';layout();return}const now=new Date().toISOString(),number=state.tasks.reduce((max,task)=>Math.max(max,Number(task.id.split('-')[1])||1000),1000)+1,task={id:`CV-${number}`,title:draft.title,description:'',result:'',subtasks:[],comments:[],project:draft.project,assignee:draft.assignee,assignee_id:draft.assigneeId,creator:meName(),creator_id:meUser()?.id,watchers:[],start_date:draft.start_date,due:draft.due,due_time:draft.due_time||null,priority:draft.priority,review:draft.review,status:'TODO',progress:0,createdAt:now,checkins:[],events:[{actor:meName(),text:'Quản lý xác nhận giao việc',at:now}]};state.tasks.unshift(task);if(!save()){state.tasks.shift();toast('Không thể lưu công việc vào trình duyệt. Hãy kiểm tra dung lượng lưu trữ.');return}state.pendingTaskDraft=null;state.ai=false;state.page='tasks';state.detail=task.id;state.filter='all';layout();toast(`Đã giao “${task.title}” cho ${task.assignee}.`)}
-function sendAI(q){state.aiMessages.push({who:'user',text:q},{who:'bot',text:aiReplyScoped(q)});layout();const c=document.getElementById('chatBody');if(c)c.scrollTop=c.scrollHeight;document.getElementById('aiQuery')?.focus()}
+function confirmTaskDraft(){
+ const draft=state.pendingTaskDraft;if(!draft)return;
+ const me=meUser();
+ const isSelf=Boolean(me&&draft.assigneeId===me.id);
+ const canConfirm=canAssignTasks()||(state.permissions.includes('tasks.create')&&isSelf);
+ if(!canConfirm){toast('Bạn chỉ có quyền tạo việc cho chính mình hoặc cần quyền Quản lý/Chủ tịch để giao việc.');return}
+ if(!draft.assigneeId){toast('Hãy tìm và chọn rõ người nhận trước khi xác nhận.');return}
+ if(!state.users.some(user=>user.id===draft.assigneeId&&user.name===draft.assignee)){
+  toast('Người nhận không còn trong danh sách nhân sự. Hãy chọn lại người nhận.');
+  draft.assigneeId='';draft.assignee='';layout();return;
+ }
+ const now=new Date().toISOString();
+ const number=state.tasks.reduce((max,task)=>Math.max(max,Number(task.id.split('-')[1])||1000),1000)+1;
+ const taskSubtasks=Array.isArray(draft.subtasks)
+  ?draft.subtasks.map((item,idx)=>typeof item==='string'?{id:`sub-${Date.now()}-${idx}`,title:item,done:false,createdBy:meName(),createdAt:now}:{id:item.id||`sub-${Date.now()}-${idx}`,title:item.title||item.text||'',done:Boolean(item.done),createdBy:meName(),createdAt:now})
+  :[];
+ const kpiObj=(state.departmentKpis||[]).find(k=>k.id===draft.kpi_id);
+ const task={
+  id:`CV-${number}`,
+  title:draft.title,
+  description:draft.description||'',
+  result:'',
+  subtasks:taskSubtasks,
+  comments:[],
+  project:draft.project||'Công việc độc lập',
+  project_id:draft.project_id||null,
+  kpi_id:draft.kpi_id||null,
+  kpi_name:draft.kpi_name||(kpiObj?kpiObj.name:null),
+  assignee:draft.assignee,
+  assignee_id:draft.assigneeId,
+  creator:meName(),
+  creator_id:me?.id||null,
+  reviewer_id:draft.review?(draft.reviewer_id||null):null,
+  watchers:[],
+  start_date:draft.start_date||addDays(0),
+  due:draft.due,
+  due_time:draft.due_time||null,
+  original_due:draft.original_due||draft.due,
+  extensions_count:Number(draft.extensions_count||0),
+  priority:draft.priority||'MEDIUM',
+  review:Boolean(draft.review),
+  status:'TODO',
+  progress:0,
+  createdAt:now,
+  checkins:[],
+  events:[{actor:meName(),text:isSelf?'Nhân sự tự tạo việc qua Trợ lý AI':'Quản lý xác nhận giao việc qua Trợ lý AI',at:now}]
+ };
+ state.tasks.unshift(task);
+ if(!save()){
+  state.tasks.shift();
+  toast('Không thể lưu công việc vào máy chủ local. Hãy kiểm tra lại.');
+  return;
+ }
+ state.pendingTaskDraft=null;
+ state.ai=false;
+ state.page='tasks';
+ state.detail=task.id;
+ state.filter='all';
+ layout();
+ loadAiBriefing(false);
+ toast(`Đã ${isSelf?'tạo việc':'giao việc'} “${task.title}” thành công.`);
+}
+async function loadAiBriefing(openPanel=false){
+ if(isAdminView())return;
+ state.aiLoadingBriefing=true;
+ try{
+  const res=await apiRequest('/demo-work/ai/briefing');
+  if(res&&res.success&&res.data){
+   state.aiBriefing=res.data;
+   if(res.data.projects&&Array.isArray(res.data.projects)){
+    state.projects=res.data.projects;
+   }
+   if(openPanel&&state.aiMessages.length===0&&res.data.greeting){
+    state.aiMessages.push({who:'bot',text:res.data.greeting});
+   }
+  }
+ }catch(err){
+  console.warn('AI Briefing API error:',err);
+ }finally{
+  state.aiLoadingBriefing=false;
+  if(!state.aiOpening){
+   layout();
+  }
+ }
+}
+async function sendAI(q){
+ const prompt=String(q||'').trim();
+ if(!prompt)return;
+ state.aiMessages.push({who:'user',text:prompt});
+ state.aiThinking=true;
+ layout();
+ const c=document.getElementById('chatBody');
+ if(c)c.scrollTop=c.scrollHeight;
+ try{
+  const res=await apiRequest('/demo-work/ai/chat',{
+   method:'POST',
+   body:JSON.stringify({prompt})
+  });
+  if(res&&res.data){
+   state.aiMessages.push({who:'bot',text:res.data.message});
+   if(res.data.draft){
+    const d=res.data.draft;
+    state.pendingTaskDraft={
+     title:d.title,
+     assignee:d.assignee||'',
+     assigneeId:d.assignee_id||'',
+     project:d.project||'Công việc độc lập',
+     project_id:d.project_id||null,
+     kpi_id:d.kpi_id||null,
+     kpi_name:d.kpi_name||null,
+     start_date:d.start_date||addDays(0),
+     due:d.due,
+     due_time:d.due_time||null,
+     original_due:d.original_due||d.due,
+     extensions_count:Number(d.extensions_count||0),
+     dueNote:d.dueNote||'',
+     priority:d.priority||'MEDIUM',
+     review:Boolean(d.review),
+     reviewer_id:d.reviewer_id||'',
+     subtasks:d.subtasks||[]
+    };
+   }
+  }else{
+   state.aiMessages.push({who:'bot',text:res.message||'Không nhận được phản hồi từ AI.'});
+  }
+ }catch(error){
+  console.warn('AI Chat API fallback to local scoped engine:',error);
+  const fallbackText=aiReplyScoped(prompt);
+  state.aiMessages.push({who:'bot',text:fallbackText});
+ }finally{
+  state.aiThinking=false;
+  layout();
+  const chatContainer=document.getElementById('chatBody');
+  if(chatContainer)chatContainer.scrollTop=chatContainer.scrollHeight;
+  document.getElementById('aiQuery')?.focus();
+ }
+}
 function saveTaskDetailChange(task,description,mutate){const index=state.tasks.indexOf(task);if(index<0)return;const previous=structuredClone(task);mutate(task);task.events??=[];task.events.push({actor:meName(),text:description,at:new Date().toISOString()});if(!save()){state.tasks[index]=previous;layout();toast('Không thể lưu thay đổi. Hãy kiểm tra dung lượng lưu trữ của trình duyệt.');return}layout();toast(description)}
 function taskAttachmentsHTML(task,section){const files=(task.attachments||[]).map((file,index)=>({...file,index})).filter(file=>file.section===section);return files.length?`<div class="task-attachments">${files.map(file=>`<button type="button" class="task-attachment" data-attachment-download="${file.index}">${ic('file')}<span>${safe(file.name)}</span><small>${Math.max(1,Math.ceil(file.size/1024))} KB</small></button>`).join('')}</div>`:''}
 function taskChecklistsHTML(task,canEdit){const lists=task.checklists||[];return `${lists.map((list,listIndex)=>`<div class="task-checklist"><strong>${safe(list.title)} <span class="detail-count">${list.items.filter(item=>item.done).length}/${list.items.length}</span></strong>${list.items.length?list.items.map((item,itemIndex)=>`<label class="subtask-row ${item.done?'is-done':''}"><input type="checkbox" data-checklist-toggle="${listIndex}:${itemIndex}" ${item.done?'checked':''} ${canEdit&&task.status!=='COMPLETED'?'':'disabled'}><span>${safe(item.text)}</span></label>`).join(''):'<p class="detail-empty">Checklist chưa có mục nào.</p>'}${canEdit&&task.status!=='COMPLETED'?`<form class="subtask-form" data-detail-form="checklist-item" data-checklist-index="${listIndex}"><input class="field" name="text" maxlength="160" minlength="2" required placeholder="Thêm mục checklist"><button class="btn" type="submit" aria-label="Thêm mục">${ic('plus')}</button></form>`:''}</div>`).join('')}`}
@@ -464,6 +911,21 @@ root.addEventListener('submit',e=>{
   const title=String(data.get('title')||'').trim(),url=String(data.get('url')||'').trim();try{const parsed=new URL(url);if(!['http:','https:'].includes(parsed.protocol)||title.length<2)throw new Error()}catch{toast('Nhập tên liên kết và địa chỉ HTTP/HTTPS hợp lệ.');return}
   saveTaskDetailChange(task,'Đã thêm liên kết',item=>{item.links??=[];item.links.push({title,url})});
  }
+ if(kind==='kpi'){
+  const kpiId=String(data.get('kpi_id')||'').trim();
+  const kpiObj=(state.departmentKpis||[]).find(k=>k.id===kpiId);
+  const kpiName=kpiObj?kpiObj.name:null;
+  saveTaskDetailChange(task,kpiId?`Gắn KPI: [${kpiId}] ${kpiName}`:'Hủy gắn KPI',item=>{item.kpi_id=kpiId||null;item.kpi_name=kpiName});
+  return;
+ }
+ if(kind==='quick-due'){
+  const due=String(data.get('due')||'').trim();
+  const dueTime=String(data.get('due_time')||'').trim()||null;
+  if(!due){toast('Vui lòng chọn hạn hoàn thành.');return}
+  const oldDue=task.due;
+  saveTaskDetailChange(task,`Thay đổi hạn nhanh: ${dateHuman(oldDue)} -> ${dateHuman(due)}${dueTime?' '+dueTime:''}`,item=>{item.due=due;item.due_time=dueTime});
+  return;
+ }
 },true);
 root.addEventListener('change',async e=>{
  const input=e.target;
@@ -507,6 +969,58 @@ root.addEventListener('pointermove',e=>{const slice=e.target instanceof Element?
 root.addEventListener('pointerout',e=>{const slice=e.target instanceof Element?e.target.closest('.kpi-pie-slice'):null;if(!slice)return;const next=e.relatedTarget instanceof Element?e.relatedTarget.closest('.kpi-pie-slice'):null;if(next&&next.closest('.kpi-pie-visual')===slice.closest('.kpi-pie-visual'))return;hideKpiTooltip(slice)});
 root.addEventListener('focusin',e=>{const slice=e.target instanceof Element?e.target.closest('.kpi-pie-slice'):null;if(slice){const bounds=slice.getBoundingClientRect();updateKpiTooltip(slice,bounds.left+bounds.width/2,bounds.top+bounds.height/2)}});
 root.addEventListener('focusout',e=>{const slice=e.target instanceof Element?e.target.closest('.kpi-pie-slice'):null;if(!slice)return;const next=e.relatedTarget instanceof Element?e.relatedTarget.closest('.kpi-pie-slice'):null;if(next&&next.closest('.kpi-pie-visual')===slice.closest('.kpi-pie-visual'))return;hideKpiTooltip(slice)});
+let isDraggingMascot=false,mascotDragStartX=0,mascotDragStartY=0,mascotInitialLeft=0,mascotInitialTop=0,hasMovedMascot=false;
+root.addEventListener('pointerdown',e=>{
+ const widget=e.target.closest('.ai-mascot-widget');
+ if(!widget)return;
+ isDraggingMascot=true;hasMovedMascot=false;
+ mascotDragStartX=e.clientX;mascotDragStartY=e.clientY;
+ const rect=widget.getBoundingClientRect();
+ mascotInitialLeft=rect.left;mascotInitialTop=rect.top;
+});
+root.addEventListener('pointermove',e=>{
+ if(!isDraggingMascot)return;
+ const dx=e.clientX-mascotDragStartX,dy=e.clientY-mascotDragStartY;
+ if(!hasMovedMascot&&Math.hypot(dx,dy)>12){
+  hasMovedMascot=true;
+  const widget=root.querySelector('.ai-mascot-widget');
+  if(widget?.setPointerCapture)widget.setPointerCapture(e.pointerId);
+ }
+ if(!hasMovedMascot)return;
+ const widget=root.querySelector('.ai-mascot-widget');
+ if(!widget)return;
+ widget.classList.add('is-dragging');
+ const w=widget.offsetWidth||70,h=widget.offsetHeight||70;
+ const nextLeft=Math.max(10,Math.min(window.innerWidth-w-10,mascotInitialLeft+dx));
+ const nextTop=Math.max(10,Math.min(window.innerHeight-h-10,mascotInitialTop+dy));
+ widget.style.left=`${nextLeft}px`;widget.style.top=`${nextTop}px`;
+ widget.style.right='auto';widget.style.bottom='auto';
+});
+const endMascotDrag=e=>{
+ if(!isDraggingMascot)return;
+ isDraggingMascot=false;
+ const widget=root.querySelector('.ai-mascot-widget');
+ if(widget){
+  widget.classList.remove('is-dragging');
+  if(hasMovedMascot){
+   const rect=widget.getBoundingClientRect();
+   try{localStorage.setItem('bfc_mascot_pos',JSON.stringify({left:Math.round(rect.left),top:Math.round(rect.top)}))}catch{}
+  }
+ }
+};
+root.addEventListener('pointerup',endMascotDrag);
+root.addEventListener('pointercancel',endMascotDrag);
+if(!window._mascotSpeechTimer){
+ window._mascotSpeechTimer=setInterval(()=>{
+  const speech=document.querySelector('.ai-mascot-speech');
+  if(!speech)return;
+  speech.classList.add('is-popped');
+  setTimeout(()=>{
+   const el=document.querySelector('.ai-mascot-speech');
+   if(el)el.classList.remove('is-popped');
+  },3200);
+ },5000);
+}
 root.addEventListener('click',(e)=>{const a=e.target.closest('[data-action]');const pg=e.target.closest('[data-page]');const task=e.target.closest('[data-task]');const filt=e.target.closest('[data-filter]');const view=e.target.closest('[data-view]');const goalToggle=e.target.closest('[data-goals-toggle]');const kpiView=e.target.closest('[data-kpi-view]');const proj=e.target.closest('[data-project]');const prompt=e.target.closest('[data-prompt]');const tr=e.target.closest('[data-transition]');
  if(e.target.closest('[data-board-move]')){e.stopPropagation();return}
  if(goalToggle){if(state.page!=='goals'||state.reportView){state.page='goals';state.reportView=false;state.goalNavOpen=true}else state.goalNavOpen=!state.goalNavOpen;state.detail=null;state.modal=null;state.mobile=false;saveUi();layout();return}
@@ -515,16 +1029,19 @@ root.addEventListener('click',(e)=>{const a=e.target.closest('[data-action]');co
  if(task){state.detail=task.dataset.task;state.modal=null;layout();return}
  if(filt){state.filter=filt.dataset.filter;layout();return}
  if(view){state.view=view.dataset.view;layout();return}
+ const kpiScopeBtn=e.target.closest('[data-kpi-scope]');
+ if(kpiScopeBtn){state.kpiScope=kpiScopeBtn.dataset.kpiScope;saveUi();layout();return}
  if(proj){state.page='tasks';state.search=proj.dataset.project;layout();return}
  if(prompt){sendAI(prompt.dataset.prompt);return}
  if(tr){transition(tr.dataset.transition);return}
  if(!a)return;
- switch(a.dataset.action){case 'menu':state.mobile=!state.mobile;layout();break;case 'notice':toast(`Bạn có ${fmtNum(stats().review)} việc chờ duyệt và ${fmtNum(stats().overdue)} việc quá hạn trong dữ liệu Demo.`);break;case 'create':state.modal='create';layout();document.getElementById('title')?.focus();break;case 'modal-close':state.modal=null;layout();break;case 'detail-close':state.detail=null;state.modal=null;layout();break;case 'checkin':state.modal='checkin';layout();document.getElementById('pct')?.focus();break;case 'reject':state.modal='reject';layout();document.getElementById('reason')?.focus();break;case 'ai':state.ai=true;layout();document.getElementById('aiQuery')?.focus();break;case 'ai-close':state.ai=false;layout();break;case 'confirm-task-draft':confirmTaskDraft();break;case 'cancel-task-draft':state.pendingTaskDraft=null;state.aiMessages.push({who:'bot',text:'Đã hủy nháp. Chưa có công việc nào được tạo.'});layout();break;case 'export':exportCSV();break;case 'theme':state.theme=state.theme==='dark'?'light':'dark';saveUi();layout();break;case 'login':state.login=!state.login;layout();break;case 'reset':if(confirm('Khôi phục toàn bộ dữ liệu Demo ban đầu?')){state.tasks=structuredClone(sample);save();layout();toast('Đã khôi phục dữ liệu Demo');}break;}
+ switch(a.dataset.action){case 'menu':state.mobile=!state.mobile;layout();break;case 'notice':toast(`Bạn có ${fmtNum(stats().review)} việc chờ duyệt và ${fmtNum(stats().overdue)} việc quá hạn trong dữ liệu Demo.`);break;case 'create':state.modal='create';layout();document.getElementById('title')?.focus();break;case 'open-extend-modal':state.modal='extend';layout();break;case 'modal-close':state.modal=null;layout();break;case 'detail-close':state.detail=null;state.modal=null;layout();break;case 'checkin':state.modal='checkin';layout();document.getElementById('pct')?.focus();break;case 'reject':state.modal='reject';layout();document.getElementById('reason')?.focus();break;case 'ai':if(hasMovedMascot){hasMovedMascot=false;break;}state.ai=true;state.aiOpening=true;layout();setTimeout(()=>{state.aiOpening=false;root.querySelector('.ai-panel')?.classList.remove('ai-panel-slide');root.querySelector('.panel-backdrop')?.classList.remove('backdrop-anim');},300);if(!state.aiBriefing){loadAiBriefing(false);}document.getElementById('aiQuery')?.focus();break;case 'ai-close':state.ai=false;state.aiOpening=false;layout();break;case 'refresh-briefing':loadAiBriefing(true);break;case 'briefing-tab':if(a.dataset.tab){state.aiBriefingTab=a.dataset.tab;layout();}break;case 'filter-main-tasks':{const tab=a.dataset.filter;state.ai=false;state.page='tasks';if(tab==='overdue')state.filter='overdue';else state.filter='all';layout();break;}case 'open-briefing-task':if(a.dataset.id){state.detail=a.dataset.id;state.ai=false;state.modal=null;layout();}break;case 'confirm-task-draft':confirmTaskDraft();break;case 'cancel-task-draft':state.pendingTaskDraft=null;state.aiMessages.push({who:'bot',text:'Đã hủy nháp. Chưa có công việc nào được tạo.'});layout();break;case 'export':exportCSV();break;case 'theme':state.theme=state.theme==='dark'?'light':'dark';saveUi();layout();break;case 'login':state.login=!state.login;layout();break;case 'reset':if(confirm('Khôi phục toàn bộ dữ liệu Demo ban đầu?')){state.tasks=structuredClone(sample);save();layout();toast('Đã khôi phục dữ liệu Demo');}break;}
 });
-root.addEventListener('change',e=>{if(e.target.matches('#createTask input[name="review"]')){const reviewerField=root.querySelector('#createTask [name="reviewer_id"]');if(reviewerField){reviewerField.disabled=!e.target.checked;reviewerField.required=e.target.checked;if(!e.target.checked)reviewerField.value=''}}if(e.target.id==='roleSwitch'){state.activeUserId=e.target.value;saveUi();layout();toast(`Đang sử dụng hồ sơ ${meName()} · ${roleLabel(meUser()?.role)}`);return}const field=e.target.dataset.draftField,draft=state.pendingTaskDraft;if(!draft||!field)return;if(field==='priority'&&['LOW','MEDIUM','HIGH'].includes(e.target.value))draft.priority=e.target.value;if(field==='review'&&['true','false'].includes(e.target.value))draft.review=e.target.value==='true'});
+root.addEventListener('change',e=>{if(e.target.id==='kpiPeriod'){state.period=e.target.value;layout();return}if(e.target.matches('[data-detail-kpi-select]')){e.target.form?.requestSubmit();return}if(e.target.matches('#createTask input[name="review"]')){const reviewerField=root.querySelector('#createTask [name="reviewer_id"]');if(reviewerField){reviewerField.disabled=!e.target.checked;reviewerField.required=e.target.checked;if(!e.target.checked)reviewerField.value=''}}if(e.target.id==='roleSwitch'){state.activeUserId=e.target.value;saveUi();layout();loadAiBriefing(false);toast(`Đang sử dụng hồ sơ ${meName()} · ${roleLabel(meUser()?.role)}`);return}const field=e.target.dataset.draftField,draft=state.pendingTaskDraft;if(!draft||!field)return;if(field==='kpi_id'){draft.kpi_id=e.target.value;const k=(state.departmentKpis||[]).find(item=>item.id===e.target.value);draft.kpi_name=k?k.name:'';layout();return}if(field==='priority'&&['LOW','MEDIUM','HIGH'].includes(e.target.value))draft.priority=e.target.value;if(field==='review'&&['true','false'].includes(e.target.value)){draft.review=e.target.value==='true';layout();}if(field==='project_id'){draft.project_id=e.target.value;const found=(state.projects||[]).find(p=>p.id===e.target.value);draft.project=found?found.name:'Công việc độc lập';}if(field==='reviewer_id'){draft.reviewer_id=e.target.value;}});
 root.addEventListener('input',e=>{if(e.target.id==='globalSearch'){let pos=e.target.selectionStart;state.search=e.target.value;state.page='tasks';layout();let s=document.getElementById('globalSearch');s?.focus();s?.setSelectionRange(pos,pos)}});
 root.addEventListener('input',e=>{if(e.target.id==='kpiBankSearch'){const pos=e.target.selectionStart;state.kpiBankSearch=e.target.value;layout();const input=document.getElementById('kpiBankSearch');input?.focus();input?.setSelectionRange(pos,pos)}});
-root.addEventListener('submit',e=>{e.preventDefault();const f=e.target;const fd=new FormData(f);if(f.id==='createTask'){const title=String(fd.get('title')||'').trim();if(title.length<4){toast('Tên công việc cần ít nhất 4 ký tự.');return}const next=state.tasks.reduce((m,t)=>Math.max(m,Number(t.id.split('-')[1])||1000),1000)+1;const t={id:'CV-'+next,title,description:'',result:'',subtasks:[],comments:[],project:String(fd.get('project')),assignee:String(fd.get('assignee')),creator:meName(),watchers:[],due:String(fd.get('due')),priority:String(fd.get('priority')),review:fd.get('review')==='on',status:'TODO',progress:0,checkins:[],events:[{actor:meName(),text:'Tạo công việc mới',at:new Date().toISOString()}]};state.tasks.unshift(t);save();state.modal=null;state.page='tasks';state.detail=t.id;state.filter='all';state.search='';layout();toast('Đã tạo công việc mới trên dữ liệu Demo');return}
+root.addEventListener('submit',e=>{e.preventDefault();const f=e.target;const fd=new FormData(f);if(f.id==='createTask'){const title=String(fd.get('title')||'').trim();if(title.length<4){toast('Tên công việc cần ít nhất 4 ký tự.');return}const id=generateNextTaskId();const kpiId=String(fd.get('kpi_id')||'').trim();const kpiObj=(state.departmentKpis||[]).find(k=>k.id===kpiId);const dueVal=String(fd.get('due')||'');const dueTimeVal=String(fd.get('due_time')||'').trim()||null;const t={id,title,description:'',result:'',subtasks:[],comments:[],project:String(fd.get('project')),assignee:String(fd.get('assignee')),creator:meName(),watchers:[],kpi_id:kpiId||null,kpi_name:kpiObj?kpiObj.name:null,due:dueVal,due_time:dueTimeVal,original_due:dueVal,extensions_count:0,priority:String(fd.get('priority')),review:fd.get('review')==='on',status:'TODO',progress:0,checkins:[],events:[{actor:meName(),text:'Tạo công việc mới',at:new Date().toISOString()}]};state.tasks.unshift(t);save();state.modal=null;state.page='tasks';state.detail=t.id;state.filter='all';state.search='';layout();toast('Đã tạo công việc mới trên dữ liệu Demo');return}
+ if(f.id==='extendTaskForm'){const t=state.tasks.find(x=>x.id===state.detail);if(!t||!roleAllowed(t,'edit')||t.status==='COMPLETED'){toast('Không thể gia hạn công việc này.');return}const newDue=String(fd.get('new_due')||'').trim();const newDueTime=String(fd.get('new_due_time')||'').trim()||null;const preset=String(fd.get('reason_preset')||'').trim();const detail=String(fd.get('reason_detail')||'').trim();if(!newDue||detail.length<10){toast('Vui lòng chọn ngày mới và nhập giải trình ít nhất 10 ký tự.');return}if(!t.original_due)t.original_due=t.due;t.due=newDue;t.due_time=newDueTime;t.extensions_count=(Number(t.extensions_count)||0)+1;const extLog=`Gia hạn lần ${t.extensions_count} đến ${dateHuman(newDue)}${newDueTime?' '+newDueTime:''}: [${preset}] ${detail}`;t.events=t.events||[];t.events.push({actor:meName(),text:extLog,at:new Date().toISOString()});save();state.modal=null;layout();toast(`Đã gửi gia hạn công việc lần ${t.extensions_count}.`);return}
  if(f.id==='checkinTask'){const t=state.tasks.find(x=>x.id===state.detail);const pct=Number(fd.get('pct'));const comment=String(fd.get('comment')||'').trim();if(!t||!roleAllowed(t,'checkin')||!['IN_PROGRESS','PAUSED'].includes(t.status)||pct<0||pct>100||comment.length<5){toast('Kiểm tra lại quyền, tiến độ và nội dung check-in.');return}t.progress=pct;t.checkins??=[];t.checkins.push({text:comment,pct,at:new Date().toISOString()});t.events??=[];t.events.push({text:'Đã check-in tiến độ '+pct+'%',actor:meName(),at:new Date().toISOString()});save();state.modal=null;layout();toast('Đã lưu check-in');return}
  if(f.id==='rejectTask'){const t=state.tasks.find(x=>x.id===state.detail);const reason=String(fd.get('reason')||'').trim();if(!t||!roleAllowed(t,'approve')||t.status!=='IN_REVIEW'||reason.length<5){toast('Yêu cầu không hợp lệ.');return}t.status='IN_PROGRESS';t.events??=[];t.events.push({text:'Trả lại kết quả: '+reason,actor:meName(),at:new Date().toISOString()});save();state.modal=null;layout();toast('Đã trả lại công việc');return}
  if(f.id==='aiForm'){const q=String(fd.get('')||document.getElementById('aiQuery')?.value||'').trim();if(q)sendAI(q)}});
@@ -567,6 +1084,7 @@ function syncLocalUsers(){return;
  }
 }
 syncLocalUsers();
+loadAiBriefing(false);
 root.addEventListener('change',e=>{
  if(e.target.id==='kpiPeriod'&&/^\d{4}-\d{2}$/.test(e.target.value)){state.period=e.target.value;layout()}
  if(e.target.id==='kpiBankDepartment'){state.kpiBankDepartment=e.target.value;layout()}
@@ -600,7 +1118,7 @@ root.addEventListener('submit',e=>{
   const data=new FormData(form),title=String(data.get('title')||'').trim(),assigneeId=String(data.get('assigneeId')||''),assignee=String(data.get('assignee')||''),startDate=String(data.get('start_date')||''),due=String(data.get('due')||''),recipient=state.users.find(user=>user.id===assigneeId&&user.name===assignee),review= data.get('review')==='on',reviewerId=String(data.get('reviewer_id')||''),reviewer=state.reviewerUsers.find(user=>user.id===reviewerId);
   if(!meUser()){state.page='settings';state.modal=null;layout();toast('Hãy tạo hồ sơ người dùng trước khi giao việc.');return}
   if(title.length<4||!recipient||(!canManage()&&recipient.id!==meUser()?.id)||(review&&!reviewer)||!Number.isFinite(Date.parse(startDate))||!Number.isFinite(Date.parse(due))||startDate>due){toast('Kiểm tra lại tên việc, người thực hiện, người nghiệm thu và thời gian công việc.');return}
-  const id=`CV-${globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2,10)}`}`,now=new Date().toISOString();
+  const id=generateNextTaskId(),now=new Date().toISOString();
   const task={id,title,description:'',result:'',subtasks:[],comments:[],project:String(data.get('project')||'Công việc độc lập'),assignee,assignee_id:assigneeId,creator:meName(),creator_id:meUser()?.id,reviewer_id:review?reviewerId:null,watchers:[],start_date:startDate,due,due_time:String(data.get('due_time')||'')||null,priority:String(data.get('priority')||'MEDIUM'),review,status:'TODO',progress:0,createdAt:now,checkins:[],events:[{actor:meName(),text:'Tạo công việc mới',at:now}]};
   state.tasks.unshift(task);if(!save()){state.tasks.shift();toast('Không thể lưu công việc vào máy chủ local.');return}state.modal=null;state.page='tasks';state.detail=task.id;state.filter='all';state.search='';layout();toast('Đã lưu công việc trên máy chủ local.');return;
  }

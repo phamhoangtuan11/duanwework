@@ -4,6 +4,8 @@ use App\Http\Controllers\DemoController;
 use App\Http\Controllers\DemoAuthController;
 use App\Http\Controllers\DemoAdminController;
 use App\Http\Controllers\DemoTaskController;
+use App\Http\Controllers\DemoProjectController;
+use App\Http\Controllers\DemoAiController;
 use App\Http\Middleware\RequireDemoAccount;
 use App\Http\Middleware\RequireSystemAdmin;
 use Illuminate\Support\Facades\Route;
@@ -38,4 +40,12 @@ Route::prefix('/demo-work')->middleware(RequireDemoAccount::class)->group(functi
     Route::post('/tasks/import-legacy', [DemoTaskController::class, 'importLegacy']);
     Route::post('/tasks/{id}/attachments', [DemoTaskController::class, 'addAttachment']);
     Route::get('/tasks/{id}/attachments/{attachmentId}', [DemoTaskController::class, 'downloadAttachment']);
+    // Project CRUD
+    Route::get('/projects', [DemoProjectController::class, 'index']);
+    Route::post('/projects', [DemoProjectController::class, 'store']);
+    Route::put('/projects/{id}', [DemoProjectController::class, 'update']);
+    Route::delete('/projects/{id}', [DemoProjectController::class, 'destroy']);
+    // AI Assistant
+    Route::get('/ai/briefing', [DemoAiController::class, 'briefing']);
+    Route::post('/ai/chat', [DemoAiController::class, 'chat']);
 });

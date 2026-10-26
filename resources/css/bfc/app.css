@@ -233,3 +233,13 @@ body{background:var(--background);-webkit-font-smoothing:antialiased}
 @media(max-width:430px){.kpi-pie-layout{grid-template-columns:minmax(0,1fr)}.kpi-pie{width:min(72vw,210px)}.kpi-pie-legend{width:100%}}
 @media(prefers-reduced-motion:reduce){.nav-parent .nav-chevron,.nav-submenu,.nav-sublink,.kpi-chart-track span,.kpi-pie-slice,.kpi-pie-tooltip{transition:none}}
 .login-logo-panel{padding:0;border:0;border-radius:0;background:transparent;box-shadow:none}
+
+/* Project Management Styles */
+.project-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.project-card-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}
+.project-card-actions .icon-btn{width:32px;height:32px;border-radius:8px}
+.project-card-actions .icon-btn:hover{background:var(--background);border-color:var(--stroke)}
+.project-code{font-size:12px;font-weight:600;color:var(--ink-muted);margin-left:4px}
+.project-chips{margin:10px 0 6px;display:flex;flex-wrap:wrap;gap:6px}
+
+.project-header .project-title{margin:0 0 4px}

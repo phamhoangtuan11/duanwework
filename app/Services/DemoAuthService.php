@@ -353,7 +353,7 @@ class DemoAuthService
                 $index = $this->findIndex($state['tasks'], (string) $candidate['id']);
                 if ($index === null) {
                     $task = $this->newTask($state, $actor, $candidate);
-                    $state['tasks'][] = $task;
+                    array_unshift($state['tasks'], $task);
                     $this->audit($state, 'task_created', $task['id'], ['title' => $task['title']], $actor['id']);
                     $changed = true;
                     continue;
@@ -370,7 +370,7 @@ class DemoAuthService
                 $this->audit($state, 'tasks_updated', 'work', ['count' => count($incoming)], $actor['id']);
             }
 
-            return array_values(array_filter($state['tasks'], fn (array $task) => $this->access->canViewTask($actor, $task, $state)));
+            return $this->access->visibleTasks($actor, $state);
         });
     }
 
@@ -485,6 +485,15 @@ class DemoAuthService
         $assigneeId = $this->resolveAssignee($state, $input, $actor);
         $assignee = $this->userById($state, $assigneeId);
         $task = $this->cleanTask($input);
+        // N?u task g?n project_id, di?n t�n d? �n t? b?ng projects d? nh?t qu�n hi?n th?
+        if (! empty($task['project_id'])) {
+            foreach ($state['projects'] ?? [] as $proj) {
+                if ($proj['id'] === $task['project_id']) {
+                    $task['project'] = $proj['name'];
+                    break;
+                }
+            }
+        }
         $task['review'] = (bool) ($task['review'] ?? false);
         $task['creator_id'] = $actor['id'];
         $task['creator'] = $actor['name'];
@@ -513,6 +522,10 @@ class DemoAuthService
         $task['events'] = [['actor' => $actor['name'], 'text' => 'Tạo công việc mới', 'at' => now()->toIso8601String()]];
         $task['comments'] = [];
         $task['subtasks'] = [];
+        $task['kpi_id'] = $task['kpi_id'] ?? null;
+        $task['kpi_name'] = $task['kpi_name'] ?? null;
+        $task['original_due'] = $task['original_due'] ?? $task['due'];
+        $task['extensions_count'] = (int) ($task['extensions_count'] ?? 0);
         $task['checklists'] = [];
         $task['links'] = [];
         $task['attachments'] = [];
@@ -541,7 +554,7 @@ class DemoAuthService
             throw ValidationException::withMessages(['reviewer_id' => 'Không thể thay đổi người nghiệm thu sau khi đã giao công việc.']);
         }
 
-        foreach (['title', 'project', 'start_date', 'due', 'due_time', 'priority', 'review', 'description', 'result'] as $field) {
+        foreach (['title', 'project', 'start_date', 'due', 'due_time', 'priority', 'review', 'description', 'result', 'kpi_id', 'kpi_name', 'original_due', 'extensions_count'] as $field) {
             if ($field === 'review' && ! array_key_exists('review', $input)) {
                 continue;
             }
@@ -569,7 +582,7 @@ class DemoAuthService
         $this->updateTaskResources($state, $actor, $current, $updated, $candidate);
         $this->updateTaskStatus($state, $actor, $current, $updated, (string) ($candidate['status'] ?? $current['status']));
         $this->updateTaskComments($state, $actor, $current, $updated, $candidate);
-        $this->updateTaskEvents($actor, $current, $updated);
+        $this->updateTaskEvents($actor, $current, $updated, $candidate);
 
         return $updated;
     }
@@ -825,14 +838,33 @@ class DemoAuthService
         $updated['events'][] = ['actor' => $actor['name'], 'text' => 'Đã thêm bình luận', 'at' => now()->toIso8601String()];
     }
 
-    private function updateTaskEvents(array $actor, array $current, array &$updated): void
+    private function updateTaskEvents(array $actor, array $current, array &$updated, array $candidate): void
     {
-        $updated['events'] ??= $current['events'] ?? [];
-        if ($updated['events'] === ($current['events'] ?? [])) {
+        $currentEvents = $current['events'] ?? [];
+        $candidateEvents = $candidate['events'] ?? [];
+
+        if (count($candidateEvents) > count($currentEvents)) {
+            $newEvents = array_slice($candidateEvents, count($currentEvents));
+            foreach ($newEvents as $evt) {
+                if (is_array($evt) && ! empty($evt['text'])) {
+                    $updated['events'][] = [
+                        'actor' => $actor['name'],
+                        'text'  => mb_substr(trim((string) $evt['text']), 0, 500),
+                        'at'    => now()->toIso8601String(),
+                    ];
+                }
+            }
+
             return;
         }
-        $updated['events'] = $current['events'] ?? [];
-        $updated['events'][] = ['actor' => $actor['name'], 'text' => 'Cập nhật thông tin công việc', 'at' => now()->toIso8601String()];
+
+        if (($updated['events'] ?? []) !== $currentEvents) {
+            return;
+        }
+
+        if ($updated !== $current) {
+            $updated['events'][] = ['actor' => $actor['name'], 'text' => 'Cập nhật thông tin công việc', 'at' => now()->toIso8601String()];
+        }
     }
 
     private function cleanTask(array $input): array
@@ -894,6 +926,10 @@ class DemoAuthService
             'events' => is_array($input['events'] ?? null) ? $input['events'] : [],
             'follower_ids' => is_array($input['follower_ids'] ?? null) ? $input['follower_ids'] : [],
             'watchers' => is_array($input['watchers'] ?? null) ? $input['watchers'] : [],
+            'kpi_id' => is_string($input['kpi_id'] ?? null) && trim($input['kpi_id']) !== '' ? trim($input['kpi_id']) : null,
+            'kpi_name' => is_string($input['kpi_name'] ?? null) && trim($input['kpi_name']) !== '' ? trim($input['kpi_name']) : null,
+            'original_due' => is_string($input['original_due'] ?? null) && trim($input['original_due']) !== '' ? trim($input['original_due']) : null,
+            'extensions_count' => (int) ($input['extensions_count'] ?? 0),
             'createdAt' => $input['createdAt'] ?? null,
             'completedAt' => $input['completedAt'] ?? null,
             'submittedAt' => $input['submittedAt'] ?? null,
